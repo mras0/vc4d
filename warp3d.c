@@ -4,42 +4,163 @@
 #include <proto/asl.h>
 #include <proto/cybergraphics.h>
 #include <proto/utility.h>
+#include <cybergraphics/cybergraphics.h>
+
+#include "draw.h"
 
 #define TODO(...) LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__)
+#define LOG_VAL(val) LOG_DEBUG("  %-20s = 0x%08lx\n", #val, val)
+
+#define LOCKED_START \
+    CGFXBASE; \
+    if (!context->HWlocked) { \
+        LOG_ERROR("%s: HW not locked!\n", __func__); \
+            return W3D_NOT_SUPPORTED; \
+    } \
+    /* XXX: Store lock in gfxdriver */ \
+    context->gfxdriver = LockBitMapTags(context->drawregion, \
+            LBMI_BYTESPERROW, (ULONG)&context->bprow, \
+            LBMI_BASEADDRESS, (ULONG)&context->vmembase, \
+            TAG_DONE); \
+    if (!context->gfxdriver) { \
+        LOG_ERROR("%s: Lock failed", __func__); \
+        return W3D_NOT_SUPPORTED; \
+    }
+
+#define LOCKED_END UnLockBitMap(context->gfxdriver)
+
+static BOOL CheckBitMap(VC4D* vc4d, struct BitMap* bm)
+{
+    CGFXBASE;
+    APTR lock = LockBitMapTags(bm, TAG_DONE);
+    if (lock) {
+        UnLockBitMap(lock);
+        return TRUE;
+    }
+    LOG_ERROR("Standard bitmap used!\n");
+    return FALSE;
+}
 
 W3D_Context *
-W3D_CreateContext(     ULONG * error __asm("a0"),
-     struct TagItem * CCTags __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    *error = W3D_UNSUPPORTED;
-    return NULL;
+    UTILBASE;
+
+    struct BitMap*  bm = (struct BitMap*)(struct BitMap*)(struct BitMap*)(struct BitMap*)GetTagData(W3D_CC_BITMAP, 0, CCTags);                    /* destination bitmap */
+    ULONG yofs      = GetTagData(W3D_CC_YOFFSET, 0, CCTags);                   /* y-Offset */
+    ULONG driver    = GetTagData(W3D_CC_DRIVERTYPE, W3D_DRIVER_BEST, CCTags);  /* see below */
+    ULONG w3dbm     = GetTagData(W3D_CC_W3DBM, W3D_FALSE, CCTags);             /* Use W3D_Bitmap instead of struct BitMap */
+    ULONG indirect  = GetTagData(W3D_CC_INDIRECT, W3D_FALSE, CCTags);          /* Indirect drawing */
+    ULONG globaltex = GetTagData(W3D_CC_GLOBALTEXENV, W3D_FALSE, CCTags);      /* SetTexEnv is global */
+    ULONG dheight   = GetTagData(W3D_CC_DOUBLEHEIGHT, W3D_FALSE, CCTags);      /* Drawing area has double height */
+    ULONG fast      = GetTagData(W3D_CC_FAST, W3D_FALSE, CCTags);              /* Allow Warp3D to modify passed Triangle/Lines/Points */
+    ULONG modeid    = GetTagData(W3D_CC_MODEID, INVALID_ID, CCTags);           /* Specify modeID to use */
+
+    LOG_VAL(bm        );
+    LOG_VAL(yofs      );
+    LOG_VAL(driver    );
+    LOG_VAL(w3dbm     );
+    LOG_VAL(indirect  );
+    LOG_VAL(globaltex );
+    LOG_VAL(dheight   );
+    LOG_VAL(fast      );
+    LOG_VAL(modeid    );
+
+    if (!bm || driver == W3D_DRIVER_CPU || w3dbm || globaltex || indirect || !CheckBitMap(vc4d, bm)) {
+        *error = W3D_UNSUPPORTED;
+        LOG_ERROR("W3D_CreateContext: Unsupported arguments.\n");
+        return NULL;
+    }
+
+    // TODO: More checking
+    // TODO: dheight does what exactly?
+
+    SYSBASE;
+    W3D_Context* context = AllocVec(sizeof(*context), MEMF_CLEAR|MEMF_PUBLIC);
+    if (!context) {
+        *error = W3D_NOMEMORY;
+        LOG_ERROR("W3D_CreateContext: Out of memory\n");
+        return NULL;
+    }
+
+    context->drawregion = bm;
+    context->yoffset = yofs;
+    if (fast)
+        context->state |= W3D_FAST;
+
+    context->scissor.left = 0;
+    context->scissor.top = 0;
+    context->scissor.width = bm->BytesPerRow / 4; // XXX: Assumes 32-bit moed
+    context->scissor.height = bm->Rows;
+    if (dheight)
+        context->scissor.height >>= 1; // ???
+
+    *error = W3D_SUCCESS;
+    return context;
 }
 
 void
-W3D_DestroyContext(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    SYSBASE;
+
+    if (context->HWlocked)
+        LOG_ERROR("W3D_DestroyContext: destryoing context with locked HW!\n");
+    if (context->zbuffer)
+        LOG_ERROR("W3D_DestroyContext: destryoing context z-buffer!\n");
+
+    FreeVec(context);
+}
+
+// N.B. bitmask starting from 0
+static const char* const StateNames[26] = {
+"W3D_AUTOTEXMANAGEMENT",
+"W3D_SYNCHRON",
+"W3D_INDIRECT",
+"W3D_GLOBALTEXENV",
+"W3D_DOUBLEHEIGHT",
+"W3D_FAST",
+"W3D_AUTOCLIP",
+"W3D_TEXMAPPING",
+"W3D_PERSPECTIVE",
+"W3D_GOURAUD",
+"W3D_ZBUFFER",
+"W3D_ZBUFFERUPDATE",
+"W3D_BLENDING",
+"W3D_FOGGING",
+"W3D_ANTI_POINT",
+"W3D_ANTI_LINE",
+"W3D_ANTI_POLYGON",
+"W3D_ANTI_FULLSCREEN",
+"W3D_DITHERING",
+"W3D_LOGICOP",
+"W3D_STENCILBUFFER",
+"W3D_ALPHATEST",
+"W3D_SPECULAR",
+"W3D_TEXMAPPING3D",
+"W3D_SCISSOR",
+"W3D_CHROMATEST",
+};
+
+ULONG
+W3D_GetState(W3D_Context * context __asm("a0"), ULONG state __asm("d1"), VC4D* vc4d __asm("a6"))
+{
+    return (context->state & state) == state ? W3D_ENABLED : W3D_DISABLED;
 }
 
 ULONG
-W3D_GetState(     W3D_Context * context __asm("a0"),
-     ULONG state __asm("d1"),
- VC4D* vc4d __asm("a6"))
+W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG action __asm("d1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
-}
-
-ULONG
-W3D_SetState(     W3D_Context * context __asm("a0"),
-     ULONG state __asm("d0"),
-     ULONG action __asm("d1"),
- VC4D* vc4d __asm("a6"))
-{
-    TODO(__func__);
+    if (state < W3D_AUTOTEXMANAGEMENT || state > W3D_CHROMATEST || (state & (state -1)) || (action != W3D_ENABLE && action != W3D_DISABLE)) {
+        LOG_ERROR("W3D_SetState: Invalid input state=0x%lx action=0x%lx\n", state, action);
+        return W3D_UNSUPPORTED;
+    }
+    for (ULONG i = 0; i < 26; ++i) {
+        if (state == (1U << (i+1))) {
+            LOG_DEBUG("TODO: W3D_SetState %s %s\n", action == W3D_ENABLE ? "Enable" : "Disable", StateNames[i]);
+            break;
+        }
+    }
     return W3D_UNSUPPORTED;
 }
 
@@ -51,18 +172,24 @@ W3D_CheckDriver( VC4D* vc4d __asm("a6"))
 }
 
 ULONG
-W3D_LockHardware(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_LockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (context->HWlocked) {
+        LOG_ERROR("W3D_LockHardware: Already locked!\n");
+        return W3D_SUCCESS;
+    }
+    context->HWlocked = W3D_TRUE;
+    return W3D_SUCCESS;
 }
 
 void
-W3D_UnLockHardware(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_UnLockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    if (context->HWlocked != W3D_TRUE) {
+        LOG_ERROR("W3D_UnLockHardware: Called without being locked!\n");
+        return;
+    }
+    context->HWlocked = W3D_FALSE;
 }
 
 void
@@ -101,22 +228,64 @@ W3D_GetTexFmtInfo(     W3D_Context * context __asm("a0"),
 }
 
 W3D_Texture *
-W3D_AllocTexObj(     W3D_Context * context __asm("a0"),
-     ULONG * error __asm("a1"),
-     struct TagItem * ATOTags __asm("a2"),
- VC4D* vc4d __asm("a6"))
+W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), struct TagItem * ATOTags __asm("a2"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    *error = W3D_UNSUPPORTED;
-    return NULL;
+    SYSBASE;
+    UTILBASE;
+
+    const ULONG image      = GetTagData(W3D_ATO_IMAGE      , 0, ATOTags);        /* texture image */
+    const ULONG format     = GetTagData(W3D_ATO_FORMAT     , 0, ATOTags);        /* source format */
+    const ULONG width      = GetTagData(W3D_ATO_WIDTH      , 0, ATOTags);        /* border width */
+    const ULONG height     = GetTagData(W3D_ATO_HEIGHT     , 0, ATOTags);        /* border height */
+    const ULONG mimap      = GetTagData(W3D_ATO_MIPMAP     , 0, ATOTags);        /* mipmap mask */
+    const ULONG palette    = GetTagData(W3D_ATO_PALETTE    , 0, ATOTags);        /* texture palette */
+    const ULONG usermip    = GetTagData(W3D_ATO_MIPMAPPTRS , 0, ATOTags);        /* array of user-supplied mipmaps */
+
+    LOG_DEBUG("W3D_AllocTexObj\n");
+    LOG_VAL(image  );
+    LOG_VAL(format );
+    LOG_VAL(width  );
+    LOG_VAL(height );
+    LOG_VAL(mimap  );
+    LOG_VAL(palette);
+    LOG_VAL(usermip);
+
+    if (!image || !format || !width || !height) {
+        *error = W3D_ILLEGALINPUT;
+        LOG_ERROR("W3D_AllocTexObj: Missing input values\n");
+        return NULL;
+    }
+
+    if ((width & (width - 1)) || (height & (height-1))) {
+        *error = W3D_UNSUPPORTEDTEXSIZE;
+        LOG_ERROR("W3D_AllocTexObj: Non-power of 2 texture\n");
+        return NULL;
+    }
+
+    W3D_Texture* texture = AllocVec(sizeof(*texture), MEMF_PUBLIC | MEMF_CLEAR);
+    if (!texture) {
+        *error = W3D_NOMEMORY;
+        LOG_ERROR("W3D_AllocTexObj: Out of memory\n");
+        return NULL;
+    }
+
+    texture->texsource = (APTR)image;
+    texture->texfmtsrc = format;
+    texture->texwidth = width;
+    texture->texheight = height;
+
+    *error = W3D_SUCCESS;
+    return texture;
 }
 
 void
-W3D_FreeTexObj(     W3D_Context * context __asm("a0"),
-     W3D_Texture * texture __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_FreeTexObj(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    SYSBASE;
+    if (!texture)
+        return;
+    // TODO: Clean up
+    FreeVec(texture);
 }
 
 void
@@ -207,13 +376,32 @@ W3D_DrawPoint(     W3D_Context * context __asm("a0"),
     return W3D_UNSUPPORTED;
 }
 
-ULONG
-W3D_DrawTriangle(     W3D_Context * context __asm("a0"),
-     W3D_Triangle * triangle __asm("a1"),
- VC4D* vc4d __asm("a6"))
+static void init_vertex(vertex* v, const W3D_Vertex* w)
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    v->x = w->x;
+    v->y = w->y;
+    v->w = w->w; // 1->0f / w->z;
+
+    v->u = w->u * v->w;
+    v->v = w->v * v->w;
+    v->r = w->color.r * v->w;
+    v->g = w->color.g * v->w;
+    v->b = w->color.b * v->w;
+    v->a = w->color.a * v->w;
+}
+
+ULONG
+W3D_DrawTriangle(W3D_Context * context __asm("a0"), W3D_Triangle * triangle __asm("a1"), VC4D* vc4d __asm("a6"))
+{
+    vertex a, b, c;
+    init_vertex(&a, &triangle->v1);
+    init_vertex(&b, &triangle->v2);
+    init_vertex(&c, &triangle->v3);
+
+    LOCKED_START;
+    draw_triangle(context, &a, &b, &c, triangle->tex);
+    LOCKED_END;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -255,13 +443,21 @@ W3D_SetBlendMode(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_SetDrawRegion(     W3D_Context * context __asm("a0"),
-     struct BitMap * bm __asm("a1"),
-     int yoffset __asm("d1"),
-     W3D_Scissor * scissor __asm("a2"),
- VC4D* vc4d __asm("a6"))
+W3D_SetDrawRegion(W3D_Context * context __asm("a0"), struct BitMap * bm __asm("a1"), int yoffset __asm("d1"), W3D_Scissor * scissor __asm("a2"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    if (bm) {
+        // Probably best not to do this every time...
+        //if (!CheckBitMap(vc4d, bm))
+        //    return W3D_ILLEGALBITMAP;
+        // TODO: Maybe check bitmap a bit more?
+        context->drawregion = bm;
+    }
+    context->yoffset = yoffset;
+    if (scissor) {
+        // TODO: Check scissor
+        context->scissor = *scissor;
+    }
+
     return W3D_UNSUPPORTED;
 }
 
@@ -307,11 +503,13 @@ W3D_AllocZBuffer(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_FreeZBuffer(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_FreeZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (context->zbuffer) {
+        LOG_DEBUG("TODO: Free Z-buffer in W3D_FreeZBuffer\n");
+    }
+    context->zbuffer = NULL;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -538,12 +736,10 @@ W3D_WriteZSpan(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_SetCurrentColor(     W3D_Context * context __asm("a0"),
-     W3D_Color * color __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_SetCurrentColor(W3D_Context * context __asm("a0"), W3D_Color * color __asm("a1"), VC4D* vc4d __asm("a6"))
 {
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -689,8 +885,7 @@ static BOOL ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1
 
 
 ULONG
-W3D_RequestMode(     struct TagItem * taglist __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_RequestMode(struct TagItem * taglist __asm("a0"), VC4D* vc4d __asm("a6"))
 {
     // Hard code this for a bit..
     CGFXBASE;

@@ -33,6 +33,7 @@ typedef struct VC4D {
 #define CGFXBASE struct Library* CyberGfxBase = vc4d->cgfxbase
 
 #define LOG_DEBUG(...) log_debug(vc4d, __VA_ARGS__)
+#define LOG_ERROR(...) log_debug(vc4d, "ERROR: " __VA_ARGS__)
 
 extern void log_debug(VC4D* vc4d, const char* fmt, ...);
 
