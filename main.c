@@ -1,4 +1,5 @@
 #include "vc4d.h"
+#include "draw.h"
 
 #include <exec/execbase.h>
 #include <exec/resident.h>

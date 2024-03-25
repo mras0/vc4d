@@ -22,9 +22,18 @@ typedef struct VC4D {
     struct Library* utilbase;
     struct Library* cgfxbase;
     BPTR seglist;
-
-    BOOL initialized;
 } VC4D;
+
+typedef struct VC4D_Context {
+    W3D_Context w3d;
+    W3D_Color fixedcolor;
+} VC4D_Context;
+
+typedef struct VC4D_Texture {
+    W3D_Texture w3d;
+    ULONG texenv;
+    W3D_Color envcolor;
+} VC4D_Texture;
 
 #define SYSBASE struct ExecBase * const SysBase = vc4d->sysbase
 #define DOSBASE struct DosBase * const DOSBase = vc4d->dosbase

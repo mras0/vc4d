@@ -41,6 +41,13 @@ static BOOL CheckBitMap(VC4D* vc4d, struct BitMap* bm)
     return FALSE;
 }
 
+static void NewList(struct List* l)
+{
+    l->lh_Head = (struct Node*)&l->lh_Tail;
+    l->lh_Tail = NULL;
+    l->lh_TailPred = (struct Node*)&l->lh_Head;
+}
+
 W3D_Context *
 W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1"), VC4D* vc4d __asm("a6"))
 {
@@ -66,17 +73,16 @@ W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1")
     LOG_VAL(fast      );
     LOG_VAL(modeid    );
 
-    if (!bm || driver == W3D_DRIVER_CPU || w3dbm || globaltex || indirect || !CheckBitMap(vc4d, bm)) {
+    if (!bm || driver == W3D_DRIVER_CPU || w3dbm || !CheckBitMap(vc4d, bm)) {
         *error = W3D_UNSUPPORTED;
         LOG_ERROR("W3D_CreateContext: Unsupported arguments.\n");
         return NULL;
     }
 
     // TODO: More checking
-    // TODO: dheight does what exactly?
 
     SYSBASE;
-    W3D_Context* context = AllocVec(sizeof(*context), MEMF_CLEAR|MEMF_PUBLIC);
+    W3D_Context* context = AllocVec(sizeof(VC4D_Context), MEMF_CLEAR|MEMF_PUBLIC);
     if (!context) {
         *error = W3D_NOMEMORY;
         LOG_ERROR("W3D_CreateContext: Out of memory\n");
@@ -87,6 +93,12 @@ W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1")
     context->yoffset = yofs;
     if (fast)
         context->state |= W3D_FAST;
+    if (globaltex)
+        context->state |= W3D_GLOBALTEXENV;
+    if (indirect)
+        context->state |= W3D_INDIRECT;
+    if (dheight)
+        context->state |= W3D_DOUBLEHEIGHT;
 
     context->scissor.left = 0;
     context->scissor.top = 0;
@@ -94,6 +106,14 @@ W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1")
     context->scissor.height = bm->Rows;
     if (dheight)
         context->scissor.height >>= 1; // ???
+
+    NewList((struct List*)&context->tex);
+    NewList((struct List*)&context->restex);
+
+    ((VC4D_Context*)context)->fixedcolor.r = 
+    ((VC4D_Context*)context)->fixedcolor.g = 
+    ((VC4D_Context*)context)->fixedcolor.b = 
+    ((VC4D_Context*)context)->fixedcolor.a = 1.0f;
 
     *error = W3D_SUCCESS;
     return context;
@@ -106,8 +126,12 @@ W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 
     if (context->HWlocked)
         LOG_ERROR("W3D_DestroyContext: destryoing context with locked HW!\n");
+
+    // TODO: Probably just clean this up automatically
     if (context->zbuffer)
         LOG_ERROR("W3D_DestroyContext: destryoing context z-buffer!\n");
+    if (!IsListEmpty((struct List*)&context->tex) || !IsListEmpty((struct List*)&context->restex))
+        LOG_ERROR("W3D_DestroyContext: desryoing context with allocated textures\n");
 
     FreeVec(context);
 }
@@ -155,6 +179,44 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
         LOG_ERROR("W3D_SetState: Invalid input state=0x%lx action=0x%lx\n", state, action);
         return W3D_UNSUPPORTED;
     }
+
+    // Supported here just means we won't complain about it changes to it..
+    const ULONG supported =
+        W3D_AUTOTEXMANAGEMENT |
+        W3D_SYNCHRON |
+        W3D_INDIRECT |
+        W3D_GLOBALTEXENV |
+        /*W3D_DOUBLEHEIGHT |  -- What does changing this imply? */
+        W3D_FAST |
+        /*W3D_AUTOCLIP |*/
+        W3D_TEXMAPPING |
+        W3D_PERSPECTIVE |
+        W3D_GOURAUD |
+        W3D_ZBUFFER |
+        /*W3D_ZBUFFERUPDATE |*/
+        W3D_BLENDING |
+        /*W3D_FOGGING |*/
+        /*W3D_ANTI_POINT |*/
+        /*W3D_ANTI_LINE |*/
+        /*W3D_ANTI_POLYGON |*/
+        /*W3D_ANTI_FULLSCREEN |*/
+        W3D_DITHERING //|
+        /*W3D_LOGICOP |*/
+        /*W3D_STENCILBUFFER |*/
+        /*W3D_ALPHATEST |*/
+        /*W3D_SPECULAR |*/
+        /*W3D_TEXMAPPING3D |*/
+        /*W3D_SCISSOR |*/
+        /*W3D_CHROMATEST*/;
+
+    if (state & supported) {
+        if (action == W3D_ENABLE)
+            context->state |= state;
+        else
+            context->state &= ~state;
+        return W3D_SUCCESS;
+    }
+
     for (ULONG i = 0; i < 26; ++i) {
         if (state == (1U << (i+1))) {
             LOG_DEBUG("TODO: W3D_SetState %s %s\n", action == W3D_ENABLE ? "Enable" : "Disable", StateNames[i]);
@@ -227,6 +289,27 @@ W3D_GetTexFmtInfo(     W3D_Context * context __asm("a0"),
     return W3D_UNSUPPORTED;
 }
 
+static const char* const FormatNames[12] = {
+    "Invalid",
+    "W3D_CHUNKY",
+    "W3D_A1R5G5B5",
+    "W3D_R5G6B5",
+    "W3D_R8G8B8",
+    "W3D_A4R4G4B4",
+    "W3D_A8R8G8B8",
+    "W3D_A8",
+    "W3D_L8",
+    "W3D_L8A8",
+    "W3D_I8",
+    "W3D_R8G8B8A8",
+};
+
+static inline ULONG Expand4_8(ULONG val)
+{
+    val &= 0xf;
+    return val << 4 | val;
+}
+
 W3D_Texture *
 W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), struct TagItem * ATOTags __asm("a2"), VC4D* vc4d __asm("a6"))
 {
@@ -243,16 +326,17 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
 
     LOG_DEBUG("W3D_AllocTexObj\n");
     LOG_VAL(image  );
-    LOG_VAL(format );
+    //LOG_VAL(format );
+    LOG_DEBUG("  %-20s = 0x%08lx (%s)\n", "format", format, format <= W3D_R8G8B8A8 ? FormatNames[format] : "<Invalid>");
     LOG_VAL(width  );
     LOG_VAL(height );
     LOG_VAL(mimap  );
     LOG_VAL(palette);
     LOG_VAL(usermip);
 
-    if (!image || !format || !width || !height) {
+    if (!image || !format || format > W3D_R8G8B8A8 || !width || !height) {
         *error = W3D_ILLEGALINPUT;
-        LOG_ERROR("W3D_AllocTexObj: Missing input values\n");
+        LOG_ERROR("W3D_AllocTexObj: Missing or illegal input values\n");
         return NULL;
     }
 
@@ -262,10 +346,18 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
         return NULL;
     }
 
-    W3D_Texture* texture = AllocVec(sizeof(*texture), MEMF_PUBLIC | MEMF_CLEAR);
+    W3D_Texture* texture = AllocVec(sizeof(VC4D_Texture), MEMF_PUBLIC | MEMF_CLEAR);
     if (!texture) {
         *error = W3D_NOMEMORY;
         LOG_ERROR("W3D_AllocTexObj: Out of memory\n");
+        return NULL;
+    }
+
+    texture->texdata = AllocVec(sizeof(uint32_t) * width * height, MEMF_PUBLIC);
+    if (!texture->texdata) {
+        *error = W3D_NOMEMORY;
+        LOG_ERROR("W3D_AllocTexObj: Out of memory for texture data\n");
+        FreeVec(texture);
         return NULL;
     }
 
@@ -273,6 +365,32 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
     texture->texfmtsrc = format;
     texture->texwidth = width;
     texture->texheight = height;
+
+    UBYTE* s = (APTR)image;
+    ULONG* d = texture->texdata;
+    ULONG n = width * height;
+
+    if (format == W3D_A8R8G8B8) {
+        while (n--) {
+            *d++ = s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3];
+            s += 4;
+        }
+    } else if (format == W3D_R8G8B8) {
+        while (n--) {
+            *d++ = 0xff << 24 | s[0] << 16 | s[1] << 8 | s[2];
+            s += 3;
+        }
+    } else if (format == W3D_A4R4G4B4) {
+        while (n--) {
+            UWORD val = *(UWORD*)s;
+            *d++ = Expand4_8(val >> 12) << 24 | Expand4_8(val >> 8) << 16 | Expand4_8(val >> 4) << 8 | Expand4_8(val);
+            s += 2;
+        }
+    } else {
+        LOG_DEBUG("TODO: Support texture format: %s\n", FormatNames[texture->texfmtsrc]);
+    }
+
+    AddTail((struct List*)&context->restex, &texture->link);
 
     *error = W3D_SUCCESS;
     return texture;
@@ -284,7 +402,8 @@ W3D_FreeTexObj(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a
     SYSBASE;
     if (!texture)
         return;
-    // TODO: Clean up
+    Remove(&texture->link);
+    FreeVec(texture->texdata);
     FreeVec(texture);
 }
 
@@ -315,26 +434,37 @@ W3D_SetFilter(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_SetTexEnv(     W3D_Context * context __asm("a0"),
-     W3D_Texture * texture __asm("a1"),
-     ULONG envparam __asm("d1"),
-     W3D_Color * envcolor __asm("a2"),
- VC4D* vc4d __asm("a6"))
+W3D_SetTexEnv(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1"), ULONG envparam __asm("d1"), W3D_Color * envcolor __asm("a2"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (envparam < W3D_REPLACE || envparam > W3D_BLEND) {
+        LOG_ERROR("W3D_SetTexEnv: Invalid envparm %ld\n", envparam);
+        return W3D_ILLEGALINPUT;
+    }
+    if (context->state & W3D_GLOBALTEXENV) {
+        for (texture = (W3D_Texture*)context->restex.mlh_Head ; texture->link.ln_Succ != NULL ; texture = (W3D_Texture*)texture->link.ln_Succ ) {
+            ((VC4D_Texture*)texture)->texenv = envparam;
+            if (envcolor)
+                ((VC4D_Texture*)texture)->envcolor = *envcolor;
+        }
+    } else {
+        ((VC4D_Texture*)texture)->texenv = envparam;
+        if (envcolor)
+            ((VC4D_Texture*)texture)->envcolor = *envcolor;
+    }
+    return W3D_SUCCESS;
 }
 
 ULONG
-W3D_SetWrapMode(     W3D_Context * context __asm("a0"),
-     W3D_Texture * texture __asm("a1"),
-     ULONG mode_s __asm("d0"),
-     ULONG mode_t __asm("d1"),
-     W3D_Color * bordercolor __asm("a2"),
- VC4D* vc4d __asm("a6"))
+W3D_SetWrapMode(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1"), ULONG mode_s __asm("d0"), ULONG mode_t __asm("d1"), W3D_Color * bordercolor __asm("a2"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    (void)texture; (void)bordercolor;
+
+    if (mode_s != W3D_REPEAT || mode_t != W3D_REPEAT) {
+        LOG_DEBUG("W3D_SetWrapMode: Unsupported mode: s=%ld t=%ld\n", mode_s, mode_t);
+        return W3D_UNSUPPORTED;
+    }
+
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -376,41 +506,80 @@ W3D_DrawPoint(     W3D_Context * context __asm("a0"),
     return W3D_UNSUPPORTED;
 }
 
-static void init_vertex(vertex* v, const W3D_Vertex* w)
+static void init_vertex(vertex* v, const W3D_Vertex* w, BOOL perspective)
 {
     v->x = w->x;
     v->y = w->y;
     v->w = w->w; // 1->0f / w->z;
 
-    v->u = w->u * v->w;
-    v->v = w->v * v->w;
-    v->r = w->color.r * v->w;
-    v->g = w->color.g * v->w;
-    v->b = w->color.b * v->w;
-    v->a = w->color.a * v->w;
+    if (perspective) {
+        v->u = w->u * v->w;
+        v->v = w->v * v->w;
+        v->r = w->color.r * v->w;
+        v->g = w->color.g * v->w;
+        v->b = w->color.b * v->w;
+        v->a = w->color.a * v->w;
+    } else {
+        v->u = w->u;
+        v->v = w->v;
+        v->r = w->color.r;
+        v->g = w->color.g;
+        v->b = w->color.b;
+        v->a = w->color.a;
+    }
 }
 
 ULONG
 W3D_DrawTriangle(W3D_Context * context __asm("a0"), W3D_Triangle * triangle __asm("a1"), VC4D* vc4d __asm("a6"))
 {
     vertex a, b, c;
-    init_vertex(&a, &triangle->v1);
-    init_vertex(&b, &triangle->v2);
-    init_vertex(&c, &triangle->v3);
+
+    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
+
+    init_vertex(&a, &triangle->v1, perspective);
+    init_vertex(&b, &triangle->v2, perspective);
+    init_vertex(&c, &triangle->v3, perspective);
+    draw_setup((VC4D_Context*)context, (VC4D_Texture*)triangle->tex);
 
     LOCKED_START;
-    draw_triangle(context, &a, &b, &c, triangle->tex);
+    draw_triangle((VC4D_Context*)context, &a, &b, &c);
     LOCKED_END;
     return W3D_SUCCESS;
 }
 
 ULONG
-W3D_DrawTriFan(     W3D_Context * context __asm("a0"),
-     W3D_Triangles * triangles __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (triangles->vertexcount < 3) {
+        LOG_ERROR("W3D_DrawTriFan: Invalid number of vertices %ld\n", triangles->vertexcount);
+        return W3D_ILLEGALINPUT;
+    }
+
+    draw_setup((VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
+
+    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
+    vertex a, b, c;
+    init_vertex(&a, &triangles->v[0], perspective);
+    init_vertex(&b, &triangles->v[1], perspective);
+    init_vertex(&c, &triangles->v[2], perspective);
+
+    LOCKED_START;
+    draw_triangle((VC4D_Context*)context, &a, &b, &c);
+    vertex* v2 = &b;
+    vertex* v3 = &c;
+    for (int i = 3; i < triangles->vertexcount; ++i) {
+        vertex* t = v2;
+        v2 = v3;
+        v3 = t;
+
+        init_vertex(v3, &triangles->v[i], perspective);
+
+        draw_triangle((VC4D_Context*)context, &a, v2, v3);
+
+    }
+    LOCKED_END;
+
+    return W3D_SUCCESS;
 }
 
 ULONG
