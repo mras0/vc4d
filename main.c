@@ -1,6 +1,10 @@
 #include "vc4d.h"
 #include "draw.h"
 
+#ifdef PISTORM32
+#include "vc4.h"
+#endif
+
 #include <exec/execbase.h>
 #include <exec/resident.h>
 #include <exec/initializers.h>
@@ -16,6 +20,16 @@ const struct Resident RomTag;
 static const char LibName[] = "Warp3D.library";
 static const char IdString[] = "vc4d " VC4D_STR(VC4D_VERSION) "." VC4D_STR(VC4D_REVISION) " (DD.MM.YYYY)";
 
+static void DoFatalInitAlert(ULONG num)
+{
+    // Seems like you need to be in supervisor mode to call Alert with AT_DeadEnd ???
+    struct ExecBase * const SysBase = *(struct ExecBase**)4;
+    SuperState();
+    Alert(AT_DeadEnd | num);
+    for (;;)
+        ;
+}
+
 static APTR LibInit(BPTR seglist asm("a0"), VC4D* vc4d asm("d0"), struct ExecBase *sysbase asm("a6"))
 {
 	vc4d->lib.lib_Node.ln_Name = (char*) LibName;
@@ -27,33 +41,30 @@ static APTR LibInit(BPTR seglist asm("a0"), VC4D* vc4d asm("d0"), struct ExecBas
 
     SYSBASE;
 
-    if (!(SysBase->AttnFlags & AFF_68020)) {
-        Alert(AT_DeadEnd|0x68020);
-        return NULL;
-    }
+    if (!(SysBase->AttnFlags & AFF_68020))
+        DoFatalInitAlert(0x68020);
 
     vc4d->dosbase = (struct DosBase*)OpenLibrary(DOSNAME, 39); // Require KS3.0
-    if (!vc4d->dosbase) {
-        Alert(AT_DeadEnd|AG_OpenLib|AO_DOSLib);
-        return NULL;
-    }
+    if (!vc4d->dosbase)
+        DoFatalInitAlert(AG_OpenLib|AO_DOSLib);
 
     vc4d->gfxbase = (struct GfxBase*)OpenLibrary("graphics.library", 39);
-    if (!vc4d->gfxbase) {
-        Alert(AT_DeadEnd|AG_OpenLib|AO_GraphicsLib);
-        return NULL;
-    }
+    if (!vc4d->gfxbase)
+        DoFatalInitAlert(AG_OpenLib|AO_GraphicsLib);
+
     vc4d->utilbase = OpenLibrary("utility.library", 39);
-    if (!vc4d->utilbase) {
-        Alert(AT_DeadEnd|AG_OpenLib|AO_UtilityLib);
-        return NULL;
-    }
+    if (!vc4d->utilbase)
+        DoFatalInitAlert(AG_OpenLib|AO_UtilityLib);
 
     vc4d->cgfxbase = OpenLibrary("cybergraphics.library", 0);
-    if (!vc4d->cgfxbase) {
-        Alert(AT_DeadEnd|AG_OpenLib);
-        return NULL;
-    }
+    if (!vc4d->cgfxbase)
+        DoFatalInitAlert(AG_OpenLib);
+
+#ifdef PISTORM32
+    int res = vc4_init(vc4d);
+    if (res)
+        DoFatalInitAlert(0x00440000|(res&0xff));
+#endif
 
 	return vc4d;
 }
@@ -61,6 +72,9 @@ static APTR LibInit(BPTR seglist asm("a0"), VC4D* vc4d asm("d0"), struct ExecBas
 static void LibCleanup(VC4D* vc4d asm("a6"))
 {
     SYSBASE;
+#ifdef PISTORM32
+    vc4_free(vc4d);
+#endif
     if (vc4d->dosbase)
         CloseLibrary((struct Library*)vc4d->dosbase);
     if (vc4d->gfxbase)
@@ -68,7 +82,7 @@ static void LibCleanup(VC4D* vc4d asm("a6"))
     if (vc4d->utilbase)
         CloseLibrary(vc4d->utilbase);
     if (vc4d->cgfxbase)
-    CloseLibrary(vc4d->cgfxbase);
+        CloseLibrary(vc4d->cgfxbase);
 }
 
 static VC4D* LibOpen(VC4D* vc4d asm("a6"))

@@ -7,6 +7,8 @@ endif()
 
 add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer -Wall -Wextra)
 
+#TODO: Make this an option
+add_definitions(-DPISTORM32)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11 -Wno-pointer-sign")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fbbb=- -std=c++17 -fno-rtti -fno-exceptions -fno-builtin")
@@ -18,6 +20,14 @@ set_source_files_properties(warp3d.c PROPERTIES COMPILE_FLAGS -Wno-unused-parame
 
 set_source_files_properties(cppsupport.c PROPERTIES COMPILE_FLAGS -fno-aggressive-loop-optimizations)
 
-add_executable(vc4d.library main.c warp3d.c debug.c cppsupport.c draw.cpp)
+add_executable(vc4d.library
+    main.c
+    warp3d.c
+    debug.c
+    #cppsupport.c
+    draw_cpu.cpp
+
+    vc4.c
+    )
 target_link_options(vc4d.library PRIVATE -ffreestanding -nostdlib -nostartfiles)
 #target_compile_options(vc4d.library PRIVATE -mpcrel)
