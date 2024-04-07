@@ -335,6 +335,8 @@ int vc4_mem_alloc(VC4D* vc4d, vc4_mem* m, unsigned size)
 
 int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigned uniform_bus)
 {
+    (void)vc4d;
+
     V3D_DBCFG  = LE32(0);       // Disallow IRQ
     V3D_DBQITE = LE32(0);       // Disable IRQ
     V3D_DBQITC = LE32(-1);      // Resets IRQ flags

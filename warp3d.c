@@ -996,7 +996,7 @@ W3D_DrawLineLoop(     W3D_Context * context __asm("a0"),
 
 static const W3D_Driver driver = {
     .ChipID = W3D_CHIP_UNKNOWN,
-    .formats = W3D_FMT_R8G8B8A8, // TODO: Support more formats...
+    .formats = W3D_FMT_B8G8R8A8, // TODO: Support more formats...
     .name = "VideoCore IV",
     .swdriver = W3D_FALSE,
 };
@@ -1047,35 +1047,38 @@ struct ScreenModeHookData {
     ULONG maxh;
 };
 
-static BOOL ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1"), struct ScreenModeRequester* req __asm("a2"))
+static BOOL ModeSupported(VC4D* vc4d, ULONG modeId)
 {
-    struct ScreenModeHookData* ctx = hook->h_Data;
-    VC4D* vc4d = ctx->vc4d;
-    GFXBASE;
     CGFXBASE;
-
-    // TODO: Filter on actually being on VC4
     if (!IsCyberModeID(modeId))
         return FALSE;
+    ULONG d = GetCyberIDAttr(CYBRIDATTR_DEPTH, modeId);
+    ULONG bpp = GetCyberIDAttr(CYBRIDATTR_BPPIX, modeId);
+    ULONG fmt = GetCyberIDAttr(CYBRIDATTR_PIXFMT, modeId);
+    return d == 24 && bpp == 4 && fmt == PIXFMT_BGRA32;
+}
 
-    struct DimensionInfo di;
-    if (!GetDisplayInfoData(NULL, (UBYTE*)&di, sizeof(di), DTAG_DIMS, modeId))
+static BOOL ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1"), struct ScreenModeRequester* req __asm("a2"))
+{
+    (void)req;
+    struct ScreenModeHookData* ctx = hook->h_Data;
+    VC4D* vc4d = ctx->vc4d;
+    CGFXBASE;
+
+    if (!ModeSupported(vc4d, modeId))
         return FALSE;
 
-    // TODO: Support more screen modes
-    if (di.MaxDepth != 24)
-        return FALSE;
-
-    const ULONG w = 1 + di.Nominal.MaxX - di.Nominal.MinX;
-    const ULONG h = 1 + di.Nominal.MaxY - di.Nominal.MinY;
+    ULONG w = GetCyberIDAttr(CYBRIDATTR_WIDTH, modeId);
+    ULONG h = GetCyberIDAttr(CYBRIDATTR_HEIGHT, modeId);
+    ULONG d = GetCyberIDAttr(CYBRIDATTR_DEPTH, modeId);
+    ULONG bpp = GetCyberIDAttr(CYBRIDATTR_BPPIX, modeId);
+    ULONG fmt = GetCyberIDAttr(CYBRIDATTR_PIXFMT, modeId);
 
     if (w < ctx->minw || w > ctx->maxw || h < ctx->minh || h > ctx->maxh)
         return FALSE;
 
-    //if (w < ctx->width || w > 2 * ctx->width || h < ctx->height || h > 2 * ctx->width)
-    //    return FALSE;
+    LOG_DEBUG("Mode %08lX: %lux%lux%lu bpp=%lu fmt=0x%lx\n", modeId, w, h, d, bpp, fmt);
 
-    LOG_DEBUG("ModeId %08lX %lux%lux%lu\n", modeId, w, h, (int)di.MaxDepth);
     return TRUE;
 }
 
@@ -1092,21 +1095,30 @@ W3D_RequestMode(struct TagItem * taglist __asm("a0"), VC4D* vc4d __asm("a6"))
     }
 #endif
 
-    SYSBASE;
-    struct Library* AslBase = OpenLibrary("asl.library", 39);
-    if (!AslBase) {
-        LOG_DEBUG("Could not open asl.library\n");
-        return INVALID_ID;
-    }
+    struct ScreenModeHookData hookData;
+    struct Hook hook = {0};
+    hook.h_Entry = (APTR)ScreenModeHook;
+    hook.h_Data = &hookData;
+
+    hookData.vc4d = vc4d;
+    hookData.tags = taglist;
+    hookData.minw = 0;
+    hookData.maxw = ~0UL;
+    hookData.minh = 0;
+    hookData.maxh = ~0UL;
 
     struct TagItem* ti;
-    struct Hook hook = {0};
+
     struct TagItem tags[32];
     const int maxtags = sizeof(tags)/sizeof(tags) - 2; // Room for hook + done
     int numtags = 0;
     LOG_DEBUG("W3D_RequestMode\n");
     for (ti = taglist; ti->ti_Tag != TAG_DONE; ++ti)  {
         if (ti->ti_Tag >= ASL_TB && ti->ti_Tag <= ASL_LAST_TAG) {
+            if (ti->ti_Tag == ASLSM_FilterFunc) {
+                LOG_ERROR("Warning: overriden filter function!\n");
+                continue;
+            }
             if (numtags < maxtags)
                 tags[numtags++] = *ti;
             continue;
@@ -1122,34 +1134,53 @@ W3D_RequestMode(struct TagItem * taglist __asm("a0"), VC4D* vc4d __asm("a6"))
     tags[numtags++].ti_Data = (ULONG)&hook;
     tags[numtags].ti_Tag = TAG_DONE;
 
-    struct ScreenModeHookData hookData;
-    hookData.vc4d = vc4d;
-    hookData.tags = taglist;
-    hookData.minw = 0;
-    hookData.maxw = ~0UL;
-    hookData.minh = 0;
-    hookData.maxh = ~0UL;
-
     UTILBASE;
     if ((ti = FindTagItem(ASLSM_MinWidth, taglist)) != NULL) hookData.minw = ti->ti_Data;
     if ((ti = FindTagItem(ASLSM_MaxWidth, taglist)) != NULL) hookData.maxw = ti->ti_Data;
     if ((ti = FindTagItem(ASLSM_MinHeight, taglist)) != NULL) hookData.minh = ti->ti_Data;
     if ((ti = FindTagItem(ASLSM_MaxHeight, taglist)) != NULL) hookData.maxh = ti->ti_Data;
 
-    hook.h_Entry = (APTR)ScreenModeHook;
-    hook.h_Data = &hookData;
+    GFXBASE;
+    LONG mode = INVALID_ID;
+//static BOOL ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1"), struct ScreenModeRequester* req __asm("a2"))
+    for (LONG modeId = INVALID_ID; (modeId = NextDisplayInfo(modeId)) != INVALID_ID;)
+    {
+        if (ScreenModeHook(&hook, modeId, NULL)) {
+            // More than one mode could match
+            if (mode != INVALID_ID) {
+                LOG_DEBUG("More than one matches\n");
+                goto request;
+            }
+            mode = modeId;
+        }
+    }
 
-    ULONG mode = INVALID_ID;
+    if (mode != INVALID_ID)
+        LOG_DEBUG("Only one mode matches: 0x%lx\n", mode);
+    else
+        LOG_ERROR("No modes match!\n");
+    return mode;
+request:
+    mode = INVALID_ID;
+
+    SYSBASE;
+    struct Library* AslBase = OpenLibrary("asl.library", 39);
+    if (!AslBase) {
+        LOG_DEBUG("Could not open asl.library\n");
+        return INVALID_ID;
+    }
+
     struct ScreenModeRequester *req;
     if ((req = AllocAslRequest(ASL_ScreenModeRequest, tags))) {
-
-        if (AslRequest(req, taglist))
+        if (AslRequest(req, tags))
             mode = req->sm_DisplayID;
         FreeAslRequest(req);
     } else {
         LOG_DEBUG("AllocAslRequest failed\n");
     }
     CloseLibrary(AslBase);
+
+    LOG_DEBUG("mode selected: %lx\n", mode);
 
     return mode;
 }
@@ -1172,7 +1203,16 @@ W3D_FlushFrame(     W3D_Context * context __asm("a0"),
 W3D_Driver *
 W3D_TestMode(ULONG ModeID __asm("d0"), VC4D* vc4d __asm("a6"))
 {
-    LOG_DEBUG("TODO: Proper W3D_TestMode 0x%lx\n", ModeID);
+    CGFXBASE;
+    ULONG w = GetCyberIDAttr(CYBRIDATTR_WIDTH, ModeID);
+    ULONG h = GetCyberIDAttr(CYBRIDATTR_HEIGHT, ModeID);
+    ULONG d = GetCyberIDAttr(CYBRIDATTR_DEPTH, ModeID);
+    ULONG bpp = GetCyberIDAttr(CYBRIDATTR_BPPIX, ModeID);
+    ULONG fmt = GetCyberIDAttr(CYBRIDATTR_PIXFMT, ModeID);
+    BOOL supported = ModeSupported(vc4d, ModeID);
+    LOG_DEBUG("TODO: Proper W3D_TestMode 0x%lx %ldx%ldx%ld bpp=%ld fmt=0x%lx supported=%ld\n", ModeID, w, h, d, bpp, fmt, (int)supported);
+    if (!supported)
+        return NULL;
     return (W3D_Driver*)&driver;
 }
 

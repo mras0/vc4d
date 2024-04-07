@@ -17,7 +17,8 @@ static void ser_putch(UBYTE ch __asm("d0"), void* context __asm("a3"))
 
 void log_debug(VC4D* vc4d, const char* fmt, ...)
 {
-#if 0
+#ifndef PISTORM32
+    (void)ser_putch;
     DOSBASE;
     BPTR out = Output();
     if (!out)

@@ -19,7 +19,7 @@ macro(qasm dst src)
     )
 endmacro()
 
-#add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer)
+add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer)
 add_compile_options(-Wall -Wextra -fno-strict-aliasing)
 
 # TODO: Make a CMake option for this
