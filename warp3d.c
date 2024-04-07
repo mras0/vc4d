@@ -261,11 +261,9 @@ W3D_UnLockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 }
 
 void
-W3D_WaitIdle(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_WaitIdle(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    (void)vc4d;
-    //TODO(__func__);
+    draw_flush(vc4d, (VC4D_Context*)context);
 }
 
 ULONG
@@ -287,13 +285,11 @@ W3D_Query(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_GetTexFmtInfo(     W3D_Context * context __asm("a0"),
-     ULONG format __asm("d0"),
-     ULONG destfmt __asm("d1"),
- VC4D* vc4d __asm("a6"))
+W3D_GetTexFmtInfo(W3D_Context * context __asm("a0"), ULONG format __asm("d0"), ULONG destfmt __asm("d1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    // N.B. context can be NULL
+    // TODO: For now just pretend everything is supported and fast
+    return W3D_TEXFMT_FAST | W3D_TEXFMT_SUPPORTED;
 }
 
 static const char* const FormatNames[12] = {
@@ -849,11 +845,10 @@ W3D_GetDriverState(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_Flush(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_Flush(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    draw_flush(vc4d, (VC4D_Context*)context);
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -1194,10 +1189,9 @@ W3D_SetScissor(     W3D_Context * context __asm("a0"),
 }
 
 void
-W3D_FlushFrame(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_FlushFrame(     W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    draw_flush(vc4d, (VC4D_Context*)context);
 }
 
 W3D_Driver *

@@ -333,9 +333,26 @@ int vc4_mem_alloc(VC4D* vc4d, vc4_mem* m, unsigned size)
 	return 0;
 }
 
+static unsigned wait_num;
+
+int vc4_wait_qpu(struct VC4D* vc4d)
+{
+    (void)vc4d;
+    if (wait_num) {
+        while (((LE32(V3D_SRQCS)>>16) & 0xff) != wait_num)
+            ;
+        wait_num = 0;
+    }
+    return 0;
+}
+
 int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigned uniform_bus)
 {
     (void)vc4d;
+    // This should never happen (uniform memory overwritten anyway)
+    //int ret = vc4_wait_qpu(vc4d);
+    //if (ret)
+    //   return ret;
 
     V3D_DBCFG  = LE32(0);       // Disallow IRQ
     V3D_DBQITE = LE32(0);       // Disable IRQ
@@ -351,11 +368,7 @@ int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigne
         V3D_SRQPC = LE32(code_bus);
     }
 
-    // Busy wait polling
-    for (;;) {
-        if (((LE32(V3D_SRQCS)>>16) & 0xff) == num_qpus)
-            break;
-    }
+    wait_num = num_qpus;
 
     return 0;
 }

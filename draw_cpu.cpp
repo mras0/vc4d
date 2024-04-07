@@ -303,3 +303,10 @@ extern "C" void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v1, c
     (void)vc4d;
     draw_func(ctx, v1, v2, v3, texture_sampler);
 }
+
+
+extern "C" void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
+{
+    (void)vc4d; (void)ctx;
+}
+

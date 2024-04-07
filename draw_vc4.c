@@ -79,6 +79,8 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     const float w2_row = orient2d(v0, v1, &p);
     const float invarea2 = 1.0f / area2;
 
+    vc4_wait_qpu(vc4d);
+
     uint32_t* unif = vc4d->uniform_mem.hostptr;
     *unif++ = LE32((maxX - minX) / XSTEP);
     *unif++ = LE32((maxY - minY + (VC4_MAX_QPUS - 1)) / VC4_MAX_QPUS);
@@ -124,4 +126,11 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
         texinfo[1] = LE32(1);
         texinfo[2] = LE32(1);
     }
+}
+
+
+void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
+{
+    (void)ctx;
+    vc4_wait_qpu(vc4d);
 }
