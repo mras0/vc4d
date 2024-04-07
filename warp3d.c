@@ -8,6 +8,12 @@
 
 #include "draw.h"
 
+#ifdef PISTORM32
+#define TEX_ENDIAN(x) LE32(x)
+#else
+#define TEX_ENDIAN(x) (x)
+#endif
+
 #define TODO(...) LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__)
 #define LOG_VAL(val) LOG_DEBUG("  %-20s = 0x%08lx\n", #val, val)
 
@@ -258,7 +264,8 @@ void
 W3D_WaitIdle(     W3D_Context * context __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    (void)vc4d;
+    //TODO(__func__);
 }
 
 ULONG
@@ -353,6 +360,17 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
         return NULL;
     }
 
+#ifdef PISTORM32
+    vc4_mem* m = &((VC4D_Texture*)texture)->texture_mem;
+    int ret = vc4_mem_alloc(vc4d, m, sizeof(uint32_t) * width * height);
+    if (ret) {
+        *error = W3D_NOMEMORY;
+        LOG_ERROR("W3D_AllocTexObj: Out of memory for texture data\n");
+        FreeVec(texture);
+        return NULL;
+    }
+    ULONG* d = m->hostptr;
+#else
     texture->texdata = AllocVec(sizeof(uint32_t) * width * height, MEMF_PUBLIC);
     if (!texture->texdata) {
         *error = W3D_NOMEMORY;
@@ -360,6 +378,8 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
         FreeVec(texture);
         return NULL;
     }
+    ULONG* d = texture->texdata;
+#endif
 
     texture->texsource = (APTR)image;
     texture->texfmtsrc = format;
@@ -367,23 +387,22 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
     texture->texheight = height;
 
     UBYTE* s = (APTR)image;
-    ULONG* d = texture->texdata;
     ULONG n = width * height;
 
     if (format == W3D_A8R8G8B8) {
         while (n--) {
-            *d++ = s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3];
+            *d++ = TEX_ENDIAN(s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3]);
             s += 4;
         }
     } else if (format == W3D_R8G8B8) {
         while (n--) {
-            *d++ = 0xff << 24 | s[0] << 16 | s[1] << 8 | s[2];
+            *d++ = TEX_ENDIAN(0xff << 24 | s[0] << 16 | s[1] << 8 | s[2]);
             s += 3;
         }
     } else if (format == W3D_A4R4G4B4) {
         while (n--) {
             UWORD val = *(UWORD*)s;
-            *d++ = Expand4_8(val >> 12) << 24 | Expand4_8(val >> 8) << 16 | Expand4_8(val >> 4) << 8 | Expand4_8(val);
+            *d++ = TEX_ENDIAN(Expand4_8(val >> 12) << 24 | Expand4_8(val >> 8) << 16 | Expand4_8(val >> 4) << 8 | Expand4_8(val));
             s += 2;
         }
     } else {
@@ -403,7 +422,11 @@ W3D_FreeTexObj(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a
     if (!texture)
         return;
     Remove(&texture->link);
+#ifdef PISTORM32
+    vc4_mem_free(vc4d, &((VC4D_Texture*)texture)->texture_mem);
+#else
     FreeVec(texture->texdata);
+#endif
     FreeVec(texture);
 }
 
@@ -510,9 +533,9 @@ static void init_vertex(vertex* v, const W3D_Vertex* w, BOOL perspective)
 {
     v->x = w->x;
     v->y = w->y;
-    v->w = w->w; // 1->0f / w->z;
 
     if (perspective) {
+        v->w = w->w; // 1->0f / w->z;
         v->u = w->u * v->w;
         v->v = w->v * v->w;
         v->r = w->color.r * v->w;
@@ -520,6 +543,7 @@ static void init_vertex(vertex* v, const W3D_Vertex* w, BOOL perspective)
         v->b = w->color.b * v->w;
         v->a = w->color.a * v->w;
     } else {
+        v->w = 1.0f;
         v->u = w->u;
         v->v = w->v;
         v->r = w->color.r;
@@ -550,6 +574,9 @@ W3D_DrawTriangle(W3D_Context * context __asm("a0"), W3D_Triangle * triangle __as
 ULONG
 W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
 {
+    if (triangles->vertexcount == 0)
+        return W3D_SUCCESS;
+
     if (triangles->vertexcount < 3) {
         LOG_ERROR("W3D_DrawTriFan: Invalid number of vertices %ld\n", triangles->vertexcount);
         return W3D_ILLEGALINPUT;
@@ -1056,12 +1083,14 @@ static BOOL ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1
 ULONG
 W3D_RequestMode(struct TagItem * taglist __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    // Hard code this for a bit..
+#if 0
     CGFXBASE;
+    // Hard code this for a bit..
     if (IsCyberModeID(0x50031303)) {
-        LOG_DEBUG("Warning: Mode hardcode in W3D_RequestMode\n");
+        LOG_DEBUG("Warning: Mode hardcoded in W3D_RequestMode\n");
         return 0x50031303;
     }
+#endif
 
     SYSBASE;
     struct Library* AslBase = OpenLibrary("asl.library", 39);
@@ -1141,11 +1170,10 @@ W3D_FlushFrame(     W3D_Context * context __asm("a0"),
 }
 
 W3D_Driver *
-W3D_TestMode(     ULONG ModeID __asm("d0"),
- VC4D* vc4d __asm("a6"))
+W3D_TestMode(ULONG ModeID __asm("d0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return NULL;
+    LOG_DEBUG("TODO: Proper W3D_TestMode 0x%lx\n", ModeID);
+    return (W3D_Driver*)&driver;
 }
 
 ULONG

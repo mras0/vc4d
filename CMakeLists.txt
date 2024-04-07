@@ -5,16 +5,40 @@ if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "AmigaOS")
     message(FATAL_ERROR "Unknown platform")
 endif()
 
-#add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer -Wall -Wextra)
-add_compile_options(-O0 -Wall -Wextra)
+find_program(VC4ASM vc4asm)
+if (NOT VC4ASM)
+    # TODO: Prebake some shaders and include them in repo
+    message(FATAL_ERROR "vc4asm not found (https://github.com/maazl/vc4asm)")
+endif()
+
+macro(qasm dst src)
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dst}
+        COMMAND ${VC4ASM} -C${CMAKE_CURRENT_BINARY_DIR}/${dst} -V -v ${CMAKE_CURRENT_SOURCE_DIR}/${src}
+        DEPENDS ${src} ${ARGN} ${CMAKE_CURRENT_SOURCE_DIR}/qpu/common.qinc ${CMAKE_CURRENT_SOURCE_DIR}/qpu/vc4.qinc
+    )
+endmacro()
+
+#add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer)
+add_compile_options(-Wall -Wextra -fno-strict-aliasing)
 
 # TODO: Make a CMake option for this
 if (FALSE)
     set(DRAW_FILES draw_cpu.cpp)
     #cppsupport.c
+    #set_source_files_properties(cppsupport.c PROPERTIES COMPILE_FLAGS -fno-aggressive-loop-optimizations)
 else()
     add_definitions(-DPISTORM32)
-    set(DRAW_FILES vc4.c draw_vc4.c)
+    qasm(simple.h qpu/simple.qasm)
+    qasm(loop.h qpu/loop.qasm)
+    qasm(body.h qpu/body.qasm)
+    set(DRAW_FILES
+        vc4.c
+        draw_vc4.c
+        ${CMAKE_CURRENT_BINARY_DIR}/loop.h
+        ${CMAKE_CURRENT_BINARY_DIR}/body.h
+    )
+    include_directories(${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11 -Wno-pointer-sign")
@@ -24,8 +48,6 @@ add_executable(test test.c)
 
 # Maybe much later this can be removed
 set_source_files_properties(warp3d.c PROPERTIES COMPILE_FLAGS -Wno-unused-parameter)
-
-set_source_files_properties(cppsupport.c PROPERTIES COMPILE_FLAGS -fno-aggressive-loop-optimizations)
 
 add_executable(vc4d.library
     main.c

@@ -44,6 +44,7 @@ typedef struct VC4D {
 #ifdef PISTORM32
     vc4_mem shader_mem;
     vc4_mem uniform_mem;
+    ULONG shader_dummy_tex_offset;
 #endif
 } VC4D;
 
@@ -56,6 +57,9 @@ typedef struct VC4D_Texture {
     W3D_Texture w3d;
     ULONG texenv;
     W3D_Color envcolor;
+#ifdef PISTORM32
+    vc4_mem texture_mem;
+#endif
 } VC4D_Texture;
 
 #define SYSBASE struct ExecBase * const SysBase = vc4d->sysbase

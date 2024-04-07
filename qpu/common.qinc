@@ -1,0 +1,130 @@
+.include "vc4.qinc"
+
+.set iXIncr,16
+.set fXIncr,16.0
+.set iNQPU,12
+.set iVPMShift,2 # Allocate 4 rows per QPU
+
+.set _areg,ra0
+.set _breg,rb0
+
+.func a_alloc
+.assert _areg <= ra31
+.set _areg,_areg+1
+_areg-1
+.endf
+
+.func b_alloc
+.assert _breg <= rb31
+.set _breg,_breg+1
+_breg-1
+.endf
+
+.macro store16h,addr,value
+    mov -,vw_wait
+    # unused(num), stride, dma
+    mov r0,qpu_num
+    shl r0,r0,iVPMShift
+    ldi r1,vpm_setup(0, 1, h32(0))
+    add vw_setup,r0,r1
+    mov vpm,value
+
+    # units, depth, dma
+    mov r0,qpu_num
+    shl r0,r0,iVPMShift+7
+    ldi r1,vdw_setup_0(1,16,dma_h32(0,0))
+    add vw_setup,r0,r1
+    mov vw_addr,addr
+.endm
+
+.macro start_load16h,addr
+    # mpitch, rowlen, nrows, dma(vpitch, y, x)
+    mov r0,qpu_num
+    shl r0,r0,iVPMShift+4
+    ldi r1,vdr_setup_0(3, 16, 1, vdr_h32(1, 0, 0))
+    add vr_setup,r0,r1
+    mov vr_addr,addr
+.endm
+
+.macro finish_load,destreg
+    mov -,vr_wait ; mov r0,qpu_num
+    shl r0,r0,iVPMShift
+    # num, stride, dma(y)
+    ldi r1,vpm_setup(1, 1, h32(0))
+    add vr_setup,r0,r1
+    mov destreg,vpm
+.endm
+
+# dst = (v0+W1*v1+W2*w2) * r3
+# i.e. r3 is assumed to contain 1/z
+# trashes r0-r2
+# N.B. delay on result
+.macro calc_varying,dst,v0,v1,v2
+    fmul    r0,fW1,v1
+    fmul    r1,fW2,v2
+    fadd    r0,r0,r1
+    fadd    r0,r0,v0
+    fmul    dst,r0,r3
+.endm
+
+.set iXSteps,b_alloc()
+.set iYSteps,a_alloc()
+.set iScreenAddr,b_alloc()
+.set iScreenDelta,a_alloc()
+.set iXCnt,a_alloc()
+.set iScreenPtr,a_alloc()
+.set iTexAddr,a_alloc()
+.set iTexWidth,a_alloc()
+.set iTexHeight,a_alloc()
+
+.set fA01,b_alloc()
+.set fA12,b_alloc()
+.set fA20,b_alloc()
+.set fB01,b_alloc()
+.set fB12,b_alloc()
+.set fB20,b_alloc()
+
+.set fW0_row,a_alloc()
+.set fW1_row,a_alloc()
+.set fW2_row,a_alloc()
+
+.set fW0,a_alloc()
+.set fW1,a_alloc()
+.set fW2,a_alloc()
+
+.set fvw0,b_alloc()
+.set fvw1,b_alloc()
+.set fvw2,b_alloc()
+.set fvu0,b_alloc()
+.set fvu1,b_alloc()
+.set fvu2,b_alloc()
+.set fvv0,b_alloc()
+.set fvv1,b_alloc()
+.set fvv2,b_alloc()
+.set fvr0,b_alloc()
+.set fvr1,b_alloc()
+.set fvr2,b_alloc()
+.set fvg0,b_alloc()
+.set fvg1,b_alloc()
+.set fvg2,b_alloc()
+.set fvb0,b_alloc()
+.set fvb1,b_alloc()
+.set fvb2,b_alloc()
+.set fva0,b_alloc()
+.set fva1,b_alloc()
+.set fva2,b_alloc()
+
+.set fU,a_alloc()
+.set fV,a_alloc()
+.set fA,a_alloc()
+.set fR,a_alloc()
+.set fG,a_alloc()
+.set fB,a_alloc()
+
+.set fMask,a_alloc()
+.set iDestColor,a_alloc()
+
+.set aTemp0,a_alloc()
+.set bTemp0,b_alloc()
+
+
