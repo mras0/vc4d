@@ -539,10 +539,10 @@ W3D_DrawTriangle(W3D_Context * context __asm("a0"), W3D_Triangle * triangle __as
     init_vertex(&a, &triangle->v1, perspective);
     init_vertex(&b, &triangle->v2, perspective);
     init_vertex(&c, &triangle->v3, perspective);
-    draw_setup((VC4D_Context*)context, (VC4D_Texture*)triangle->tex);
+    draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangle->tex);
 
     LOCKED_START;
-    draw_triangle((VC4D_Context*)context, &a, &b, &c);
+    draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     LOCKED_END;
     return W3D_SUCCESS;
 }
@@ -555,7 +555,7 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
         return W3D_ILLEGALINPUT;
     }
 
-    draw_setup((VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
+    draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
     const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
@@ -564,7 +564,7 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
     init_vertex(&c, &triangles->v[2], perspective);
 
     LOCKED_START;
-    draw_triangle((VC4D_Context*)context, &a, &b, &c);
+    draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     vertex* v2 = &b;
     vertex* v3 = &c;
     for (int i = 3; i < triangles->vertexcount; ++i) {
@@ -574,7 +574,7 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
 
         init_vertex(v3, &triangles->v[i], perspective);
 
-        draw_triangle((VC4D_Context*)context, &a, v2, v3);
+        draw_triangle(vc4d, (VC4D_Context*)context, &a, v2, v3);
 
     }
     LOCKED_END;

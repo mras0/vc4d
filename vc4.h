@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+// TODO: Review if it's actually necessary...
+#define PHYS_TO_BUS(x) ((ULONG)(x)|0xC0000000)
+
 struct VC4D;
 
 #define VC4_MAX_QPUS 12
@@ -25,17 +28,11 @@ typedef struct vc4_mem {
 	void* hostptr;
 } vc4_mem;
 
-typedef struct vc4_qpu_desc {
-    unsigned num_qpus;
-    const void* code_ptr_host;
-    const void* uniform_ptrs_host[VC4_MAX_QPUS];
-} vc4_qpu_desc;
-
 int vc4_init(struct VC4D* vc4d);
 void vc4_free(struct VC4D* vc4d);
 
 int vc4_mem_alloc(struct VC4D* vc4d, vc4_mem* m, unsigned size);
 void vc4_mem_free(struct VC4D* vc4d, vc4_mem* m);
-int vc4_run_qpu(struct VC4D* vc4d, const vc4_qpu_desc* desc, vc4_mem* mem); // NB. code+uniforms must have been allocated from mem, and there must be room for 2*num_qpus words at end
+int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigned uniform_bus);
 
 #endif

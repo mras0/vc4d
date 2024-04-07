@@ -1,10 +1,6 @@
 #include "vc4d.h"
 #include "draw.h"
 
-#ifdef PISTORM32
-#include "vc4.h"
-#endif
-
 #include <exec/execbase.h>
 #include <exec/resident.h>
 #include <exec/initializers.h>
@@ -29,6 +25,12 @@ static void DoFatalInitAlert(ULONG num)
     for (;;)
         ;
 }
+
+#ifdef PISTORM32
+static uint32_t simple_shader[] = {
+#include "simple.h"
+};
+#endif
 
 static APTR LibInit(BPTR seglist asm("a0"), VC4D* vc4d asm("d0"), struct ExecBase *sysbase asm("a6"))
 {
@@ -64,6 +66,17 @@ static APTR LibInit(BPTR seglist asm("a0"), VC4D* vc4d asm("d0"), struct ExecBas
     int res = vc4_init(vc4d);
     if (res)
         DoFatalInitAlert(0x00440000|(res&0xff));
+    res = vc4_mem_alloc(vc4d, &vc4d->shader_mem, VC4_SHADER_MEM_SIZE);
+    if (res)
+        DoFatalInitAlert(0x00450000|(res&0xff));
+    res = vc4_mem_alloc(vc4d, &vc4d->uniform_mem, VC4_UNIFORM_MEM_SIZE);
+    if (res)
+        DoFatalInitAlert(0x00460000|(res&0xff));
+
+    for (uint32_t i = 0; i < sizeof(simple_shader)/sizeof(*simple_shader); ++i)
+        ((uint32_t*)vc4d->shader_mem.hostptr)[i] = LE32(simple_shader[i]);
+    CacheClearE(vc4d->shader_mem.hostptr, vc4d->shader_mem.size, CACRF_ClearD);
+
 #endif
 
 	return vc4d;
@@ -73,6 +86,8 @@ static void LibCleanup(VC4D* vc4d asm("a6"))
 {
     SYSBASE;
 #ifdef PISTORM32
+    vc4_mem_free(vc4d, &vc4d->uniform_mem);
+    vc4_mem_free(vc4d, &vc4d->shader_mem);
     vc4_free(vc4d);
 #endif
     if (vc4d->dosbase)

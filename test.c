@@ -23,7 +23,7 @@ void PrintDriverInfo(void)
 	}
 	printf("Available drivers:\n");
 	while (*drivers) {
-		printf("%s\n\tSupports format 0x%lX\n\t",
+		printf("%s\n\tSupports format 0x%X\n\t",
 			drivers[0]->name, drivers[0]->formats);
 		if (drivers[0]->swdriver) printf("CPU Driver\n");
 		else                      printf("Hardware Driver\n");
@@ -57,9 +57,6 @@ int main(void)
     if (!DosBase)
         return -1;
     printf("%s version %d.%d\n", (const char*)Warp3DBase->lib_IdString, Warp3DBase->lib_Version, Warp3DBase->lib_Revision);
-
-    ULONG Cerror;
-    W3D_Context* context = NULL;
 
     TRACE();
     printf("%04X %08X\n", *(UWORD*)((char*)Warp3DBase - 54), *(ULONG*)((char*)Warp3DBase - 54 + 2));

@@ -5,10 +5,17 @@ if (NOT ${CMAKE_SYSTEM_NAME} STREQUAL "AmigaOS")
     message(FATAL_ERROR "Unknown platform")
 endif()
 
-add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer -Wall -Wextra)
+#add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer -Wall -Wextra)
+add_compile_options(-O0 -Wall -Wextra)
 
-#TODO: Make this an option
-add_definitions(-DPISTORM32)
+# TODO: Make a CMake option for this
+if (FALSE)
+    set(DRAW_FILES draw_cpu.cpp)
+    #cppsupport.c
+else()
+    add_definitions(-DPISTORM32)
+    set(DRAW_FILES vc4.c draw_vc4.c)
+endif()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu11 -Wno-pointer-sign")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fbbb=- -std=c++17 -fno-rtti -fno-exceptions -fno-builtin")
@@ -24,10 +31,7 @@ add_executable(vc4d.library
     main.c
     warp3d.c
     debug.c
-    #cppsupport.c
-    draw_cpu.cpp
-
-    vc4.c
+    ${DRAW_FILES}
     )
 target_link_options(vc4d.library PRIVATE -ffreestanding -nostdlib -nostartfiles)
 #target_compile_options(vc4d.library PRIVATE -mpcrel)

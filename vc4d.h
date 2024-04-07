@@ -7,11 +7,29 @@
 #include <graphics/gfxbase.h>
 #include <Warp3D/Warp3D.h>
 
+#ifdef PISTORM32
+#include "vc4.h"
+#endif
+
 #define VC4D_VERSION    3 // TODO: v4
 #define VC4D_REVISION   0
 
 #define VC4D_STR(x) VC4D_XSTR(x)
 #define VC4D_XSTR(x) #x
+
+#define VC4_SHADER_MEM_SIZE (64*1024)
+#define VC4_UNIFORM_MEM_SIZE (4*1024)
+
+#define LE32(x) __builtin_bswap32(x)
+
+static inline ULONG LE32F(float f)
+{
+    union {
+        ULONG u;
+        float f;
+    } u = { .f = f };
+    return LE32(u.u);
+}
 
 typedef struct VC4D {
     struct Library lib;
@@ -22,6 +40,11 @@ typedef struct VC4D {
     struct Library* utilbase;
     struct Library* cgfxbase;
     BPTR seglist;
+
+#ifdef PISTORM32
+    vc4_mem shader_mem;
+    vc4_mem uniform_mem;
+#endif
 } VC4D;
 
 typedef struct VC4D_Context {

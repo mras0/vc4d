@@ -267,8 +267,9 @@ static sampler_func_ptr samplers[] = {
 static sampler_func_ptr texture_sampler;
 static decltype(&renderer<0>::draw_triangle) draw_func;
 
-extern "C" void draw_setup(VC4D_Context* ctx, const VC4D_Texture* tex)
+extern "C" void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
 {
+    (void)vc4d;
     W3D_Context* wctx = &ctx->w3d;
     ULONG mode = wctx->state;
 
@@ -297,7 +298,8 @@ extern "C" void draw_setup(VC4D_Context* ctx, const VC4D_Texture* tex)
 }
 
 
-extern "C" void draw_triangle(VC4D_Context* ctx, const vertex* v1, const vertex* v2, const vertex* v3)
+extern "C" void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v1, const vertex* v2, const vertex* v3)
 {
+    (void)vc4d;
     draw_func(ctx, v1, v2, v3, texture_sampler);
 }
