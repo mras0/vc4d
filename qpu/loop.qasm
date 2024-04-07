@@ -2,6 +2,10 @@
 
 # TODO: A number of registers aren't live at the same time in the innerloop
 
+    mov         iNumTriangles,unif
+
+:triloop
+
     # Fetch uniforms
     mov         iXSteps,unif
     mov         iYSteps,unif
@@ -122,6 +126,16 @@
     mov         fW0,fW0_row # delay slot 1
     mov         fW1,fW1_row # delay slot 2
     mov         fW2,fW2_row # delay slot 3
+
+    nop
+    nop
+
+    sub.setf    iNumTriangles,iNumTriangles,1
+    brr.anynz   -,:triloop
+
+    nop         # delay slot 1
+    nop         # delay slot 2
+    nop         # delay slot 3
 
     mov         -,vw_wait
 

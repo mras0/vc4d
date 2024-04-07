@@ -67,6 +67,7 @@ _breg-1
     fmul    dst,r0,r3
 .endm
 
+.set iNumTriangles,a_alloc()
 .set iXSteps,b_alloc()
 .set iYSteps,a_alloc()
 .set iScreenAddr,b_alloc()

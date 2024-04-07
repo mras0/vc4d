@@ -17,8 +17,10 @@
 #define VC4D_STR(x) VC4D_XSTR(x)
 #define VC4D_XSTR(x) #x
 
+#define BATCH_MAX_TRINAGLES (64)
+
 #define VC4_SHADER_MEM_SIZE (64*1024)
-#define VC4_UNIFORM_MEM_SIZE (4*1024)
+#define VC4_UNIFORM_MEM_SIZE (BATCH_MAX_TRINAGLES*64*4) // Assume 64 uniforms/tri (very conservative)
 
 #define LE32(x) __builtin_bswap32(x)
 
@@ -45,6 +47,7 @@ typedef struct VC4D {
     vc4_mem shader_mem;
     vc4_mem uniform_mem;
     ULONG shader_dummy_tex_offset;
+    ULONG uniform_offset;
 #endif
 } VC4D;
 

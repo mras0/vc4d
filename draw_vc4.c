@@ -46,7 +46,6 @@ static inline uint32_t lef32(float f)
 
 void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex* v1, const vertex* v2)
 {
-    SYSBASE;
     W3D_Context* wctx = &ctx->w3d;
 
     float area2 = orient2d(v0, v1, v2);
@@ -79,29 +78,33 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     const float w2_row = orient2d(v0, v1, &p);
     const float invarea2 = 1.0f / area2;
 
-    vc4_wait_qpu(vc4d);
-
     uint32_t* unif = vc4d->uniform_mem.hostptr;
-    *unif++ = LE32((maxX - minX) / XSTEP);
-    *unif++ = LE32((maxY - minY + (VC4_MAX_QPUS - 1)) / VC4_MAX_QPUS);
-    *unif++ = LE32(PHYS_TO_BUS((ULONG)wctx->vmembase + 4*minX + wctx->bprow*(minY + wctx->yoffset)));
-    *unif++ = LE32(wctx->bprow);
-    *unif++ = texinfo[0]; // tex addr
-    *unif++ = texinfo[1]; // tex w
-    *unif++ = texinfo[2]; // tex h
-    *unif++ = lef32(A01);
-    *unif++ = lef32(A12);
-    *unif++ = lef32(A20);
-    *unif++ = lef32(B01);
-    *unif++ = lef32(B12);
-    *unif++ = lef32(B20);
-    *unif++ = lef32(w0_row);
-    *unif++ = lef32(w1_row);
-    *unif++ = lef32(w2_row);
+    if (*unif >= BATCH_MAX_TRINAGLES)
+        draw_flush(vc4d, ctx);
+
+
+    uint32_t idx = 1 + vc4d->uniform_offset;
+
+    unif[idx++] = LE32((maxX - minX) / XSTEP);
+    unif[idx++] = LE32((maxY - minY + (VC4_MAX_QPUS - 1)) / VC4_MAX_QPUS);
+    unif[idx++] = LE32(PHYS_TO_BUS((ULONG)wctx->vmembase + 4*minX + wctx->bprow*(minY + wctx->yoffset)));
+    unif[idx++] = LE32(wctx->bprow);
+    unif[idx++] = texinfo[0]; // tex addr
+    unif[idx++] = texinfo[1]; // tex w
+    unif[idx++] = texinfo[2]; // tex h
+    unif[idx++] = lef32(A01);
+    unif[idx++] = lef32(A12);
+    unif[idx++] = lef32(A20);
+    unif[idx++] = lef32(B01);
+    unif[idx++] = lef32(B12);
+    unif[idx++] = lef32(B20);
+    unif[idx++] = lef32(w0_row);
+    unif[idx++] = lef32(w1_row);
+    unif[idx++] = lef32(w2_row);
 #define VARYING(n) \
-    *unif++ = lef32(v0->n); \
-    *unif++ = lef32((v1->n - v0->n) * invarea2); \
-    *unif++ = lef32((v2->n - v0->n) * invarea2)
+    unif[idx++] = lef32(v0->n); \
+    unif[idx++] = lef32((v1->n - v0->n) * invarea2); \
+    unif[idx++] = lef32((v2->n - v0->n) * invarea2)
     VARYING(w);
     VARYING(u);
     VARYING(v);
@@ -110,8 +113,8 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     VARYING(b);
     VARYING(a);
 #undef VARYING
-    CacheClearE(vc4d->uniform_mem.hostptr, (ULONG)unif - (ULONG)vc4d->uniform_mem.hostptr, CACRF_ClearD);
-    vc4_run_qpu(vc4d, VC4_MAX_QPUS, vc4d->shader_mem.busaddr, vc4d->uniform_mem.busaddr);
+    vc4d->uniform_offset = idx - 1;
+    ++*unif;
 }
 
 void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
@@ -131,6 +134,15 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
 
 void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
 {
-    (void)ctx;
-    vc4_wait_qpu(vc4d);
+    uint32_t* num_tri = (uint32_t*)vc4d->uniform_mem.hostptr;
+    if (*num_tri) {
+        SYSBASE;
+        LOG_DEBUG("TODO: Drawing %lu triangles\n", *num_tri);
+        *num_tri = LE32(*num_tri);
+        CacheClearE(vc4d->uniform_mem.hostptr, 4*(1 + vc4d->uniform_offset), CACRF_ClearD);
+        vc4_run_qpu(vc4d, VC4_MAX_QPUS, vc4d->shader_mem.busaddr, vc4d->uniform_mem.busaddr);
+        vc4_wait_qpu(vc4d);
+        vc4d->uniform_offset = 0;
+        *num_tri = 0;
+    }
 }
