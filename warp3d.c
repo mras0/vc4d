@@ -1,4 +1,5 @@
 #include "vc4d.h"
+#include <stddef.h>
 #include <proto/exec.h>
 #include <proto/graphics.h>
 #include <proto/asl.h>
@@ -15,6 +16,7 @@
 #endif
 
 #define TODO(...) LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__)
+#define XTODO(...) LOG_DEBUG("XTODO: Implement %s\n", __VA_ARGS__)
 #define LOG_VAL(val) LOG_DEBUG("  %-20s = 0x%08lx\n", #val, val)
 
 static BOOL CheckBitMap(VC4D* vc4d, struct BitMap* bm)
@@ -27,6 +29,20 @@ static BOOL CheckBitMap(VC4D* vc4d, struct BitMap* bm)
     }
     LOG_ERROR("Standard bitmap used!\n");
     return FALSE;
+}
+
+static inline BOOL SetScissor(VC4D* vc4d, VC4D_Context* vctx, const W3D_Scissor* scissor, const char* func)
+{
+    // Maybe just clip the region instead?
+    // Also need to consider yoffset..
+    if ((ULONG)scissor->left < vctx->width && (ULONG)(scissor->left + scissor->width) <= vctx->width &&
+            (ULONG)scissor->top < vctx->height && (ULONG)(scissor->top + scissor->height) <= vctx->height) {
+        vctx->w3d.scissor = *scissor;
+        return TRUE;
+    } else {
+        LOG_ERROR("%s: Invalid scissor region %lu,%lu,%lu,%lu\n", func, scissor->left, scissor->top, scissor->width, scissor->height);
+        return FALSE;
+    }
 }
 
 static void NewList(struct List* l)
@@ -90,10 +106,13 @@ W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1")
 
     context->scissor.left = 0;
     context->scissor.top = 0;
-    context->scissor.width = bm->BytesPerRow / 4; // XXX: Assumes 32-bit moed
+    context->scissor.width = bm->BytesPerRow / 4; // XXX: Assumes 32-bit mode
     context->scissor.height = bm->Rows;
     if (dheight)
-        context->scissor.height >>= 1; // ???
+        context->scissor.height >>= 1;
+
+    ((VC4D_Context*)context)->width = context->scissor.width;
+    ((VC4D_Context*)context)->height = context->scissor.height;
 
     NewList((struct List*)&context->tex);
     NewList((struct List*)&context->restex);
@@ -107,6 +126,9 @@ W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1")
     return context;
 }
 
+ULONG W3D_FreeAllTexObj(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
+ULONG W3D_FreeZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
+
 void
 W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
@@ -115,11 +137,8 @@ W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
     if (context->HWlocked)
         LOG_ERROR("W3D_DestroyContext: destryoing context with locked HW!\n");
 
-    // TODO: Probably just clean this up automatically
-    if (context->zbuffer)
-        LOG_ERROR("W3D_DestroyContext: destryoing context z-buffer!\n");
-    if (!IsListEmpty((struct List*)&context->tex) || !IsListEmpty((struct List*)&context->restex))
-        LOG_ERROR("W3D_DestroyContext: desryoing context with allocated textures\n");
+    W3D_FreeZBuffer(context, vc4d);
+    W3D_FreeAllTexObj(context, vc4d);
 
     FreeVec(context);
 }
@@ -170,9 +189,9 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
 
     // Supported here just means we won't complain about it changes to it..
     const ULONG supported =
-        W3D_AUTOTEXMANAGEMENT |
-        W3D_SYNCHRON |
-        W3D_INDIRECT |
+//        W3D_AUTOTEXMANAGEMENT |
+//        W3D_SYNCHRON |
+//        W3D_INDIRECT |
         W3D_GLOBALTEXENV |
         /*W3D_DOUBLEHEIGHT |  -- What does changing this imply? */
         W3D_FAST |
@@ -180,9 +199,9 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
         W3D_TEXMAPPING |
         W3D_PERSPECTIVE |
         W3D_GOURAUD |
-        W3D_ZBUFFER |
-        /*W3D_ZBUFFERUPDATE |*/
-        W3D_BLENDING |
+        /*W3D_ZBUFFER |
+        W3D_ZBUFFERUPDATE |*/
+//        W3D_BLENDING |
         /*W3D_FOGGING |*/
         /*W3D_ANTI_POINT |*/
         /*W3D_ANTI_LINE |*/
@@ -197,21 +216,21 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
         /*W3D_SCISSOR |*/
         /*W3D_CHROMATEST*/;
 
-    if (state & supported) {
-        if (action == W3D_ENABLE)
-            context->state |= state;
-        else
-            context->state &= ~state;
-        return W3D_SUCCESS;
-    }
-
-    for (ULONG i = 0; i < 26; ++i) {
-        if (state == (1U << (i+1))) {
-            LOG_DEBUG("TODO: W3D_SetState %s %s\n", action == W3D_ENABLE ? "Enable" : "Disable", StateNames[i]);
-            break;
+    if (!(state & supported)) {
+        for (ULONG i = 0; i < 26; ++i) {
+            if (state == (1U << (i+1))) {
+                LOG_DEBUG("TODO: W3D_SetState %s %s\n", action == W3D_ENABLE ? "Enable" : "Disable", StateNames[i]);
+                break;
+            }
         }
     }
-    return W3D_UNSUPPORTED;
+
+    // Fake everything..
+    if (action == W3D_ENABLE)
+        context->state |= state;
+    else
+        context->state &= ~state;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -267,19 +286,29 @@ W3D_CheckIdle(     W3D_Context * context __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
 }
 
 ULONG
 W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG destfmt __asm("d1"), VC4D* vc4d __asm("a6"))
 {
+    // TODO: Pretend everything is supported for now
 #define QUERY(x) case x: LOG_DEBUG("%s: TODO %s\n", __func__, #x); break
     switch (query) {
-    case W3D_Q_DRAW_TRIANGLE:
-    case W3D_Q_TEXMAPPING:
-    case W3D_Q_PERSPECTIVE:
-    case W3D_Q_GOURAUDSHADING:
-        return W3D_FULLY_SUPPORTED;
+        case W3D_Q_DRAW_TRIANGLE:
+        case W3D_Q_TEXMAPPING:
+        case W3D_Q_PERSPECTIVE:
+        case W3D_Q_GOURAUDSHADING:
+            break;
+        case W3D_Q_MAXTEXWIDTH:
+        case W3D_Q_MAXTEXHEIGHT:
+        case W3D_Q_MAXTEXWIDTH_P:
+        case W3D_Q_MAXTEXHEIGHT_P:
+            return 2048;
+    QUERY(W3D_Q_LINEAR_REPEAT);
+    QUERY(W3D_Q_LINEAR_CLAMP);
+    QUERY(W3D_Q_PERSP_REPEAT);
+    QUERY(W3D_Q_PERSP_CLAMP);
     QUERY(W3D_Q_DRAW_POINT);
     QUERY(W3D_Q_DRAW_LINE);
     QUERY(W3D_Q_DRAW_POINT_X);
@@ -291,10 +320,6 @@ W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG dest
     QUERY(W3D_Q_MIPMAPPING);
     QUERY(W3D_Q_BILINEARFILTER);
     QUERY(W3D_Q_MMFILTER);
-    QUERY(W3D_Q_LINEAR_REPEAT);
-    QUERY(W3D_Q_LINEAR_CLAMP);
-    QUERY(W3D_Q_PERSP_REPEAT);
-    QUERY(W3D_Q_PERSP_CLAMP);
     QUERY(W3D_Q_ENV_REPLACE);
     QUERY(W3D_Q_ENV_DECAL);
     QUERY(W3D_Q_ENV_MODULATE);
@@ -327,10 +352,6 @@ W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG dest
     QUERY(W3D_Q_DITHERING);
     QUERY(W3D_Q_PALETTECONV);
     QUERY(W3D_Q_SCISSOR);
-    QUERY(W3D_Q_MAXTEXWIDTH);
-    QUERY(W3D_Q_MAXTEXHEIGHT);
-    QUERY(W3D_Q_MAXTEXWIDTH_P);
-    QUERY(W3D_Q_MAXTEXHEIGHT_P);
     QUERY(W3D_Q_RECTTEXTURES);
     QUERY(W3D_Q_LOGICOP);
     QUERY(W3D_Q_MASKING);
@@ -345,9 +366,10 @@ W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG dest
     QUERY(W3D_Q_DRAW_LINE_TEX);
         default:
     LOG_ERROR("%s: Unknown query value %lu\n", __func__, query);
+    return W3D_UNSUPPORTED;
     }
 
-    return W3D_UNSUPPORTED;
+    return W3D_FULLY_SUPPORTED;
 }
 
 ULONG
@@ -524,8 +546,8 @@ W3D_SetFilter(     W3D_Context * context __asm("a0"),
      ULONG mag __asm("d1"),
  VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    XTODO(__func__);
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -571,7 +593,7 @@ W3D_UpdateTexImage(     W3D_Context * context __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -580,7 +602,7 @@ W3D_UploadTexture(     W3D_Context * context __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -646,6 +668,8 @@ W3D_DrawTriangle(W3D_Context * context __asm("a0"), W3D_Triangle * triangle __as
     return W3D_SUCCESS;
 }
 
+#define VSWAP(a,b) do { vertex* t = a; a = b; b = t; } while (0)
+
 ULONG
 W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
 {
@@ -659,7 +683,7 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
 
     if (!context->HWlocked) {
         LOG_ERROR("%s: Hardware not locked!\n", __func__);
-        return W3D_NOT_SUPPORTED;
+        return W3D_UNSUPPORTED;
     }
 
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
@@ -674,9 +698,7 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
     vertex* v2 = &b;
     vertex* v3 = &c;
     for (int i = 3; i < triangles->vertexcount; ++i) {
-        vertex* t = v2;
-        v2 = v3;
-        v3 = t;
+        VSWAP(v2, v3);
 
         init_vertex(v3, &triangles->v[i], perspective);
 
@@ -688,12 +710,41 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
 }
 
 ULONG
-W3D_DrawTriStrip(     W3D_Context * context __asm("a0"),
-     W3D_Triangles * triangles __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (triangles->vertexcount == 0)
+        return W3D_SUCCESS;
+
+    if (triangles->vertexcount < 3) {
+        LOG_ERROR("%s: Invalid number of vertices %ld\n", __func__, triangles->vertexcount);
+        return W3D_ILLEGALINPUT;
+    }
+
+    if (!context->HWlocked) {
+        LOG_ERROR("%s: Hardware not locked!\n", __func__);
+        return W3D_UNSUPPORTED;
+    }
+
+    draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
+
+    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
+    vertex a, b, c;
+    init_vertex(&a, &triangles->v[0], perspective);
+    init_vertex(&b, &triangles->v[1], perspective);
+    init_vertex(&c, &triangles->v[2], perspective);
+
+    draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+    vertex* v1 = &a;
+    vertex* v2 = &b;
+    vertex* v3 = &c;
+    for (int i = 3; i < triangles->vertexcount; ++i) {
+        VSWAP(v1,v2);
+        VSWAP(v2,v3);
+        init_vertex(v3, &triangles->v[i], perspective);
+        draw_triangle(vc4d, (VC4D_Context*)context, v1, v2, v3);
+    }
+
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -703,7 +754,7 @@ W3D_SetAlphaMode(     W3D_Context * context __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -713,7 +764,7 @@ W3D_SetBlendMode(     W3D_Context * context __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -726,21 +777,19 @@ W3D_SetDrawRegion(W3D_Context * context __asm("a0"), struct BitMap * bm __asm("a
         // TODO: Maybe check bitmap a bit more?
         context->drawregion = bm;
     }
-    context->yoffset = yoffset;
-    if (scissor) {
-        // TODO: Check scissor
-        context->scissor = *scissor;
-    }
+    if (scissor)
+        SetScissor(vc4d, (VC4D_Context*)context, scissor, __func__);
 
-    return W3D_UNSUPPORTED;
+    // TODO: Check yoffset is in range (take scissor into acount)
+    context->yoffset = yoffset;
+    return W3D_SUCCESS;
 }
 
 ULONG
 W3D_SetFogParams(W3D_Context * context __asm("a0"), W3D_Fog * fogparams __asm("a1"), ULONG fogmode __asm("d1"), VC4D* vc4d __asm("a6"))
 {
-    //TODO
-    //TODO(__func__);
-    return W3D_UNSUPPORTED;
+    TODO(__func__);
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -751,8 +800,8 @@ W3D_SetColorMask(     W3D_Context * context __asm("a0"),
      W3D_Bool alpha __asm("d3"),
  VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    XTODO(__func__);
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -766,31 +815,45 @@ W3D_SetStencilFunc(     W3D_Context * context __asm("a0"),
     return W3D_UNSUPPORTED;
 }
 
-ULONG
-W3D_AllocZBuffer(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_FreeZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
-}
-
-ULONG
-W3D_FreeZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
-{
-    if (context->zbuffer) {
-        LOG_DEBUG("TODO: Free Z-buffer in W3D_FreeZBuffer\n");
-    }
-    context->zbuffer = NULL;
+#ifdef PISTORM32
+    vc4_mem_free(vc4d, &((VC4D_Context*)context)->zbuffer_mem);
+#endif
     return W3D_SUCCESS;
 }
 
-ULONG
-W3D_ClearZBuffer(     W3D_Context * context __asm("a0"),
-     W3D_Double * clearvalue __asm("a1"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_AllocZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    W3D_FreeZBuffer(context, vc4d);
+#ifdef PISTORM32
+    VC4D_Context* vctx = (VC4D_Context*)context;
+    int ret = vc4_mem_alloc(vc4d, &vctx->zbuffer_mem, vctx->width * vctx->height * 4);
+    if (ret) {
+        LOG_ERROR("%s: Failed to allocate z-buffer! %ld\n", __func__, ret);
+        return W3D_NOGFXMEM;
+    }
+#endif
+
+    return W3D_SUCCESS;
+}
+
+
+ULONG
+W3D_ClearZBuffer(W3D_Context * context __asm("a0"), W3D_Double * clearvalue __asm("a1"), VC4D* vc4d __asm("a6"))
+{
+#ifdef PISTORM32
+    VC4D_Context* vctx = (VC4D_Context*)context;
+    float* buffer = vctx->zbuffer_mem.hostptr;
+    if (!buffer) {
+        LOG_ERROR("%s: No zbuffer\n", __func__);
+        return W3D_NOZBUFFER;
+    }
+    const float val = *clearvalue;
+    for (ULONG i = vctx->width * vctx->height; i--; )
+        *buffer++ = val;
+#endif
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -805,15 +868,27 @@ W3D_ReadZPixel(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_ReadZSpan(     W3D_Context * context __asm("a0"),
-     ULONG x __asm("d0"),
-     ULONG y __asm("d1"),
-     ULONG n __asm("d2"),
-     W3D_Double * z __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_ReadZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y __asm("d1"), ULONG n __asm("d2"), W3D_Double * z __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+#ifdef PISTORM32
+    VC4D_Context* vctx = (VC4D_Context*)context;
+    float* buffer = vctx->zbuffer_mem.hostptr;
+    if (!buffer) {
+        LOG_ERROR("%s: No zbuffer\n", __func__);
+        return W3D_NOZBUFFER;
+    }
+
+    if (y >= vctx->height || x >= vctx->width || n >= vctx->width || x + n > vctx->width) {
+        LOG_ERROR("%s: x=%lu, y=%lu, n=%lu out of range!\n", __func__, x, y, n);
+        return W3D_NOTVISIBLE;
+    }
+
+    buffer += x + y * vctx->width;
+    while (n--)
+        *z++ = *buffer++;
+
+#endif
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -902,8 +977,8 @@ W3D_Hint(     W3D_Context * context __asm("a0"),
      ULONG quality __asm("d1"),
  VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    XTODO(__func__);
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -994,15 +1069,36 @@ W3D_WriteZPixel(     W3D_Context * context __asm("a0"),
 }
 
 void
-W3D_WriteZSpan(     W3D_Context * context __asm("a0"),
-     ULONG x __asm("d0"),
-     ULONG y __asm("d1"),
-     ULONG n __asm("d2"),
-     W3D_Double * z __asm("a1"),
-     UBYTE * maks __asm("a2"),
- VC4D* vc4d __asm("a6"))
+W3D_WriteZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y __asm("d1"), ULONG n __asm("d2"), W3D_Double * z __asm("a1"), UBYTE * masks __asm("a2"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+#ifdef PISTORM32
+    VC4D_Context* vctx = (VC4D_Context*)context;
+    float* buffer = vctx->zbuffer_mem.hostptr;
+    if (!buffer) {
+        LOG_ERROR("%s: No zbuffer\n", __func__);
+        return;
+    }
+
+    if (y >= vctx->height || x >= vctx->width || n >= vctx->width || x + n > vctx->width) {
+        LOG_ERROR("%s: x=%lu, y=%lu, n=%lu out of range!\n", __func__, x, y, n);
+        return;
+    }
+
+    buffer += x + y * vctx->width;
+    if (masks) {
+        while (n--) {
+            if (*masks)
+                *buffer = *z;
+            ++masks;
+            ++buffer;
+            ++z;
+        }
+    } else {
+        while (n--)
+            *buffer++ = *z++;
+    }
+
+#endif
 }
 
 ULONG
@@ -1036,11 +1132,14 @@ W3D_UpdateTexSubImage(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_FreeAllTexObj(     W3D_Context * context __asm("a0"),
- VC4D* vc4d __asm("a6"))
+W3D_FreeAllTexObj(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    while (!IsListEmpty((struct List*)&context->restex)) {
+        W3D_Texture* tex = (W3D_Texture*)((ULONG)context->restex.mlh_Head->mln_Succ - offsetof(W3D_Texture, link));
+        W3D_FreeTexObj(context, tex, vc4d);
+    }
+
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -1260,15 +1359,19 @@ request:
 }
 
 void
-W3D_SetScissor(     W3D_Context * context __asm("a0"),
-     W3D_Scissor * scissor __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_SetScissor(W3D_Context * context __asm("a0"), W3D_Scissor * scissor __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    if (scissor) {
+        SetScissor(vc4d, (VC4D_Context*)context, scissor, __func__);
+    } else {
+        context->scissor.top = context->scissor.left = 0;
+        context->scissor.width = ((VC4D_Context*)context)->width;
+        context->scissor.height = ((VC4D_Context*)context)->height;
+    }
 }
 
 void
-W3D_FlushFrame(     W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
+W3D_FlushFrame(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
     draw_flush(vc4d, (VC4D_Context*)context);
 }
@@ -1284,8 +1387,10 @@ W3D_TestMode(ULONG ModeID __asm("d0"), VC4D* vc4d __asm("a6"))
     ULONG fmt = GetCyberIDAttr(CYBRIDATTR_PIXFMT, ModeID);
     BOOL supported = ModeSupported(vc4d, ModeID);
     LOG_DEBUG("TODO: Proper W3D_TestMode 0x%lx %ldx%ldx%ld bpp=%ld fmt=0x%lx supported=%ld\n", ModeID, w, h, d, bpp, fmt, (int)supported);
-    if (!supported)
-        return NULL;
+    if (!supported) {
+        LOG_DEBUG("TODO: %s\n", __func__);
+    //    return NULL;
+    }
     return (W3D_Driver*)&driver;
 }
 
@@ -1302,12 +1407,31 @@ W3D_SetChromaTestBounds(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_ClearDrawRegion(     W3D_Context * context __asm("a0"),
-     ULONG color __asm("d0"),
- VC4D* vc4d __asm("a6"))
+W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (!context->HWlocked) {
+        LOG_ERROR("%s: Hardware not locked!\n", __func__);
+        return W3D_UNSUPPORTED;
+    }
+
+    // TODO: Optimize, and do correctly
+
+    uint32_t smodulo = context->bprow / sizeof(uint32_t);
+    uint32_t* screen = (uint32_t*)context->vmembase + smodulo * context->yoffset;
+
+    const int clip_x0 = context->scissor.left;
+    const int clip_x1 = context->scissor.left + context->scissor.width;
+    const int clip_y0 = context->scissor.top;
+    const int clip_y1 = context->scissor.top + context->scissor.height;
+
+    for (int y = clip_y0; y < clip_y1; ++y) {
+        for (int x = clip_x0; x < clip_x1; ++x) {
+            screen[x + y * smodulo] = LE32(0xffff00ff);
+        }
+    }
+
+
+    return W3D_SUCCESS;
 }
 
 ULONG
@@ -1329,12 +1453,42 @@ W3D_DrawTriFanV(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_DrawTriStripV(     W3D_Context * context __asm("a0"),
-     W3D_TrianglesV * triangles __asm("a1"),
- VC4D* vc4d __asm("a6"))
+W3D_DrawTriStripV(W3D_Context * context __asm("a0"), W3D_TrianglesV * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (triangles->vertexcount == 0)
+        return W3D_SUCCESS;
+
+    if (triangles->vertexcount < 3) {
+        LOG_ERROR("%s: Invalid number of vertices %ld\n", __func__, triangles->vertexcount);
+        return W3D_ILLEGALINPUT;
+    }
+
+    if (!context->HWlocked) {
+        LOG_ERROR("%s: Hardware not locked!\n", __func__);
+        return W3D_UNSUPPORTED;
+    }
+
+    draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
+
+    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
+    vertex a, b, c;
+    init_vertex(&a, triangles->v[0], perspective);
+    init_vertex(&b, triangles->v[1], perspective);
+    init_vertex(&c, triangles->v[2], perspective);
+
+    draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+    vertex* v1 = &a;
+    vertex* v2 = &b;
+    vertex* v3 = &c;
+    for (int i = 3; i < triangles->vertexcount; ++i) {
+        VSWAP(v1,v2); // v2=a,v1=b
+        VSWAP(v2,v3); // v2=c,v3=a
+        init_vertex(v3, triangles->v[i], perspective);
+        // TODO: Consider order
+        draw_triangle(vc4d, (VC4D_Context*)context, v1, v2, v3);
+    }
+
+    return W3D_SUCCESS;
 }
 
 W3D_ScreenMode *
@@ -1354,8 +1508,43 @@ W3D_FreeScreenmodeList(     W3D_ScreenMode * list __asm("a0"),
 ULONG
 W3D_BestModeID(struct TagItem * tags __asm("a0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    UTILBASE;
+    CGFXBASE;
+    GFXBASE;
+
+    const ULONG driver     = GetTagData(W3D_BMI_DRIVER , 0, tags);
+    const ULONG width      = GetTagData(W3D_BMI_WIDTH  , 0, tags);
+    const ULONG height     = GetTagData(W3D_BMI_HEIGHT , 0, tags);
+    const ULONG depth      = GetTagData(W3D_BMI_DEPTH  , 0, tags);
+
+    LOG_DEBUG("%s %lux%lux%lu driver=0x%lx\n", __func__, width, height, depth, driver);
+
+    LONG mode = INVALID_ID;
+    int bestErr = 1000000;
+    for (LONG modeId = INVALID_ID; (modeId = NextDisplayInfo(modeId)) != INVALID_ID;) {
+        if (!ModeSupported(vc4d, modeId))
+            continue;
+        ULONG w = GetCyberIDAttr(CYBRIDATTR_WIDTH, modeId);
+        ULONG h = GetCyberIDAttr(CYBRIDATTR_HEIGHT, modeId);
+        if (w == width && h == height) {
+            LOG_DEBUG("%s %lux%lu exact match found: 0x%lx\n", __func__, width, height, modeId);
+            return modeId;
+        }
+        int we = (int)(w - width);
+        int he = (int)(h - height);
+        int err = we*we+he*he;
+        if (err < bestErr) {
+            //LOG_DEBUG("%s %lux%lu best so far 0x%lx (%lux%lu)\n", __func__, width, height, modeId, w, h);
+            bestErr = err;
+            mode = modeId;
+        }
+    }
+
+    if (mode == INVALID_ID) {
+        LOG_ERROR("%s Could not find %lux%lu mode\n", __func__, width, height);
+    }
+
+    return mode;
 }
 
 ULONG
@@ -1404,7 +1593,7 @@ W3D_BindTexture(     W3D_Context* context __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
 }
 
 ULONG

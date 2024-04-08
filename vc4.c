@@ -298,8 +298,8 @@ void vc4_free(VC4D* vc4d)
 
 void vc4_mem_free(VC4D* vc4d, vc4_mem* m)
 {
-	LOG_DEBUG("Freeing %lu bytes, busaddr = %lx phys = %lx\n", m->size, m->busaddr, BUS_TO_PHYS(m->busaddr));
 	if (m->handle) {
+        LOG_DEBUG("Freeing %lu bytes, busaddr = %lx phys = %lx\n", m->size, m->busaddr, BUS_TO_PHYS(m->busaddr));
 		if (m->busaddr)
 			mem_unlock(vc4d, m->handle);
 		mem_free(vc4d, m->handle);

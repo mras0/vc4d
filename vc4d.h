@@ -54,6 +54,14 @@ typedef struct VC4D {
 typedef struct VC4D_Context {
     W3D_Context w3d;
     W3D_Color fixedcolor;
+
+    // Used for Z-buffer
+    ULONG width;
+    ULONG height;
+
+#ifdef PISTORM32
+    vc4_mem zbuffer_mem;
+#endif
 } VC4D_Context;
 
 typedef struct VC4D_Texture {
