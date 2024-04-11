@@ -26,48 +26,6 @@ static void DoFatalInitAlert(ULONG num)
         ;
 }
 
-#ifdef PISTORM32
-static const uint32_t qpu_loop[] = {
-#include "loop.h"
-};
-static const uint32_t qpu_body[] = {
-#include "body.h"
-};
-
-#define IS_BRANCH(x) ((x) >> 28 == 15)
-
-static uint32_t* merge_code(uint32_t* dest, const uint32_t* loop, unsigned loop_icnt, const uint32_t* body, unsigned body_icnt)
-{
-    const uint32_t adjust = (body_icnt - 1) * 8; // -1 for marker
-    while (loop_icnt--) {
-        uint32_t w0 = loop[0];
-        uint32_t w1 = loop[1];
-        loop += 2;
-
-        if (w0 == UINT32_MAX && w1 == UINT32_MAX) {
-            for (unsigned i = 0; i < body_icnt * 2; ++i)
-                *dest++ = LE32(body[i]);
-            continue;
-        }
-
-        if (IS_BRANCH(w1)) {
-            //assert((w1 >> 19) & 1); // Absolute branches not supported
-            if ((int32_t)w0 < 0)
-                w0 -= adjust;
-            else
-                w0 += adjust;
-        }
-
-        *dest++ = LE32(w0);
-        *dest++ = LE32(w1);
-    }
-
-    return dest;
-}
-
-
-#endif
-
 static APTR LibInit(BPTR seglist asm("a0"), VC4D* vc4d asm("d0"), struct ExecBase *sysbase asm("a6"))
 {
 	vc4d->lib.lib_Node.ln_Name = (char*) LibName;
@@ -102,21 +60,6 @@ static APTR LibInit(BPTR seglist asm("a0"), VC4D* vc4d asm("d0"), struct ExecBas
     int res = vc4_init(vc4d);
     if (res)
         DoFatalInitAlert(0x00440000|(res&0xff));
-    res = vc4_mem_alloc(vc4d, &vc4d->shader_mem, VC4_SHADER_MEM_SIZE);
-    if (res)
-        DoFatalInitAlert(0x00450000|(res&0xff));
-    res = vc4_mem_alloc(vc4d, &vc4d->uniform_mem, VC4_UNIFORM_MEM_SIZE);
-    if (res)
-        DoFatalInitAlert(0x00460000|(res&0xff));
-
-    //for (uint32_t i = 0; i < sizeof(simple_shader)/sizeof(*simple_shader); ++i)
-    //    ((uint32_t*)vc4d->shader_mem.hostptr)[i] = LE32(simple_shader[i]);
-
-    uint32_t* end = merge_code(vc4d->shader_mem.hostptr, qpu_loop, sizeof(qpu_loop)/8, qpu_body, sizeof(qpu_body)/8);
-    vc4d->shader_dummy_tex_offset = (ULONG)end - (ULONG)vc4d->shader_mem.hostptr;
-    *end++ = -1;
-    CacheClearE(vc4d->shader_mem.hostptr, (ULONG)end - (ULONG)vc4d->shader_mem.hostptr, CACRF_ClearD);
-
 #endif
 
 	return vc4d;
@@ -126,8 +69,6 @@ static void LibCleanup(VC4D* vc4d asm("a6"))
 {
     SYSBASE;
 #ifdef PISTORM32
-    vc4_mem_free(vc4d, &vc4d->uniform_mem);
-    vc4_mem_free(vc4d, &vc4d->shader_mem);
     vc4_free(vc4d);
 #endif
     if (vc4d->dosbase)

@@ -1,3 +1,5 @@
+// TODO: Support multiple contexts (need to arbitrate access...)
+
 #include "vc4.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -16,6 +18,7 @@ static APTR DeviceTreeBase;
 static ULONG MailBox;
 static uint32_t MBReqStorage[MAX_COMMAND_LENGTH + 4];
 static uint32_t* MBReq;
+static uint32_t BytesAllocated;
 
 #define PR_STAT(name) LOG_DEBUG("%-20s 0x%lx\n", #name, LE32(V3D_ ## name))
 
@@ -291,6 +294,9 @@ int vc4_init(VC4D* vc4d)
 void vc4_free(VC4D* vc4d)
 {
     LOG_DEBUG("vc4_free\n");
+    if (BytesAllocated) {
+        LOG_ERROR("Still %lu bytes allocated!\n", BytesAllocated);
+    }
     int ret = qpu_enable(vc4d, 0);
     LOG_DEBUG("qpu_enable(0) %ld\n", ret);
 }
@@ -299,6 +305,7 @@ void vc4_free(VC4D* vc4d)
 void vc4_mem_free(VC4D* vc4d, vc4_mem* m)
 {
 	if (m->handle) {
+        BytesAllocated -= m->size;
         LOG_DEBUG("Freeing %lu bytes, busaddr = %lx phys = %lx\n", m->size, m->busaddr, BUS_TO_PHYS(m->busaddr));
 		if (m->busaddr)
 			mem_unlock(vc4d, m->handle);
@@ -330,6 +337,7 @@ int vc4_mem_alloc(VC4D* vc4d, vc4_mem* m, unsigned size)
 		return -3;
 	}
 	LOG_DEBUG("Allocated %lu bytes, busaddr = %lx phys = %lx\n", size, m->busaddr, BUS_TO_PHYS(m->busaddr));
+    BytesAllocated += m->size;
 	return 0;
 }
 

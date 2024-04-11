@@ -11,12 +11,17 @@ if (NOT VC4ASM)
     message(FATAL_ERROR "vc4asm not found (https://github.com/maazl/vc4asm)")
 endif()
 
-macro(qasm dst src)
+set(QASM_HEADERS "")
+
+macro(qasm name)
+    set(dst ${CMAKE_CURRENT_BINARY_DIR}/${name}.h)
+    set(src ${CMAKE_CURRENT_SOURCE_DIR}/qpu/${name}.qasm)
     add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${dst}
-        COMMAND ${VC4ASM} -C${CMAKE_CURRENT_BINARY_DIR}/${dst} -V -v ${CMAKE_CURRENT_SOURCE_DIR}/${src}
+        OUTPUT ${dst}
+        COMMAND ${VC4ASM} -C${dst} -V -v ${src}
         DEPENDS ${src} ${ARGN} ${CMAKE_CURRENT_SOURCE_DIR}/qpu/common.qinc ${CMAKE_CURRENT_SOURCE_DIR}/qpu/vc4.qinc
     )
+    set(QASM_HEADERS ${QASM_HEADERS} ${dst})
 endmacro()
 
 add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer)
@@ -29,14 +34,16 @@ if (FALSE)
     #set_source_files_properties(cppsupport.c PROPERTIES COMPILE_FLAGS -fno-aggressive-loop-optimizations)
 else()
     add_definitions(-DPISTORM32)
-    qasm(simple.h qpu/simple.qasm)
-    qasm(loop.h qpu/loop.qasm)
-    qasm(body.h qpu/body.qasm)
+    qasm(loop)
+    qasm(body)
+    qasm(interp_color)
+    qasm(tex_lookup_wrap)
+    qasm(w3d_modulate)
+    qasm(w3d_replace)
     set(DRAW_FILES
         vc4.c
         draw_vc4.c
-        ${CMAKE_CURRENT_BINARY_DIR}/loop.h
-        ${CMAKE_CURRENT_BINARY_DIR}/body.h
+        ${QASM_HEADERS}
     )
     include_directories(${CMAKE_CURRENT_BINARY_DIR})
 endif()

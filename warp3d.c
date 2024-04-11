@@ -52,8 +52,37 @@ static void NewList(struct List* l)
     l->lh_TailPred = (struct Node*)&l->lh_Head;
 }
 
-W3D_Context *
-W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1"), VC4D* vc4d __asm("a6"))
+ULONG W3D_FreeAllTexObj(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
+ULONG W3D_FreeZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
+
+void W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
+{
+    SYSBASE;
+
+    if (context->HWlocked)
+        LOG_ERROR("W3D_DestroyContext: destryoing context with locked HW!\n");
+
+#ifdef PISTORM32
+    VC4D_Context* vctx = (VC4D_Context*)context;
+    vc4_mem_free(vc4d, &vctx->uniform_mem);
+
+    for (ULONG i = 0; i < VC4D_SHADER_HASH_SIZE; ++i) {
+        for (VC4D_Shader* s = vctx->shader_hash[i], *next; s; s = next) {
+            next = s->next;
+            vc4_mem_free(vc4d, &s->code_mem);
+            FreeVec(s);
+        }
+    }
+
+#endif
+
+    W3D_FreeZBuffer(context, vc4d);
+    W3D_FreeAllTexObj(context, vc4d);
+
+    FreeVec(context);
+}
+
+W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1"), VC4D* vc4d __asm("a6"))
 {
     UTILBASE;
 
@@ -111,38 +140,34 @@ W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTags __asm("a1")
     if (dheight)
         context->scissor.height >>= 1;
 
-    ((VC4D_Context*)context)->width = context->scissor.width;
-    ((VC4D_Context*)context)->height = context->scissor.height;
+    VC4D_Context* vctx = (VC4D_Context*)context;
+
+    vctx->width = context->scissor.width;
+    vctx->height = context->scissor.height;
 
     NewList((struct List*)&context->tex);
     NewList((struct List*)&context->restex);
 
-    ((VC4D_Context*)context)->fixedcolor.r = 
-    ((VC4D_Context*)context)->fixedcolor.g = 
-    ((VC4D_Context*)context)->fixedcolor.b = 
-    ((VC4D_Context*)context)->fixedcolor.a = 1.0f;
+
+    vctx->fixedcolor.r =
+    vctx->fixedcolor.g =
+    vctx->fixedcolor.b =
+    vctx->fixedcolor.a = 1.0f;
+
+#ifdef PISTORM32
+    int res = vc4_mem_alloc(vc4d, &vctx->uniform_mem, VC4_UNIFORM_MEM_SIZE);
+    if (res) {
+        LOG_ERROR("Failed to allocate memory for QPU uniforms\n");
+        W3D_DestroyContext(context, vc4d);
+        *error = W3D_NOMEMORY;
+        return NULL;
+    }
+
+#endif
 
     *error = W3D_SUCCESS;
     return context;
 }
-
-ULONG W3D_FreeAllTexObj(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
-ULONG W3D_FreeZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
-
-void
-W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
-{
-    SYSBASE;
-
-    if (context->HWlocked)
-        LOG_ERROR("W3D_DestroyContext: destryoing context with locked HW!\n");
-
-    W3D_FreeZBuffer(context, vc4d);
-    W3D_FreeAllTexObj(context, vc4d);
-
-    FreeVec(context);
-}
-
 // N.B. bitmask starting from 0
 static const char* const StateNames[26] = {
 "W3D_AUTOTEXMANAGEMENT",
@@ -474,6 +499,8 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
     texture->texfmtsrc = format;
     texture->texwidth = width;
     texture->texheight = height;
+
+    ((VC4D_Texture*)texture)->texenv = W3D_REPLACE;
 
     UBYTE* s = (APTR)image;
     ULONG n = width * height;

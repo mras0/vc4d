@@ -42,14 +42,17 @@ typedef struct VC4D {
     struct Library* utilbase;
     struct Library* cgfxbase;
     BPTR seglist;
+} VC4D;
 
 #ifdef PISTORM32
-    vc4_mem shader_mem;
-    vc4_mem uniform_mem;
-    ULONG shader_dummy_tex_offset;
-    ULONG uniform_offset;
+typedef struct VC4D_Shader {
+    struct VC4D_Shader* next;
+    ULONG ident;
+    vc4_mem code_mem;
+} VC4D_Shader;
+
+#define VC4D_SHADER_HASH_SIZE 64
 #endif
-} VC4D;
 
 typedef struct VC4D_Context {
     W3D_Context w3d;
@@ -60,6 +63,15 @@ typedef struct VC4D_Context {
     ULONG height;
 
 #ifdef PISTORM32
+    vc4_mem uniform_mem;
+    ULONG uniform_offset;
+
+    ULONG shader_temp[512];
+    VC4D_Shader* shader_hash[VC4D_SHADER_HASH_SIZE];
+
+    ULONG texinfo[3];
+    VC4D_Shader* cur_shader;
+
     vc4_mem zbuffer_mem;
 #endif
 } VC4D_Context;

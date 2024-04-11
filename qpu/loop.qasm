@@ -11,9 +11,6 @@
     mov         iYSteps,unif
     mov         iScreenAddr,unif
     mov         iScreenDelta,unif
-    mov         iTexAddr,unif
-    mov         iTexWidth,unif
-    mov         iTexHeight,unif
     mov         fA01,unif
     mov         fA12,unif
     mov         fA20,unif
@@ -26,12 +23,18 @@
     mov         fvw0,unif
     mov         fvw1,unif
     mov         fvw2,unif
+
+
+    mov         iTexAddr,unif
+    mov         iTexWidth,unif
+    mov         iTexHeight,unif
     mov         fvu0,unif
     mov         fvu1,unif
     mov         fvu2,unif
     mov         fvv0,unif
     mov         fvv1,unif
     mov         fvv2,unif
+
     mov         fvr0,unif
     mov         fvr1,unif
     mov         fvr2,unif

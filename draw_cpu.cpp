@@ -309,4 +309,3 @@ extern "C" void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
 {
     (void)vc4d; (void)ctx;
 }
-
