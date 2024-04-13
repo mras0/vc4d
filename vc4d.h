@@ -71,6 +71,7 @@ typedef struct VC4D_Context {
 
     ULONG texinfo[3];
     VC4D_Shader* cur_shader;
+    const struct VC4D_Texture* cur_tex;
 
     vc4_mem zbuffer_mem;
 #endif

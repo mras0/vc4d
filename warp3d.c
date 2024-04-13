@@ -585,6 +585,7 @@ W3D_SetTexEnv(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1
         return W3D_ILLEGALINPUT;
     }
     if (context->state & W3D_GLOBALTEXENV) {
+        // TODO: Instead of this probably just save it once and fix in draw_triangle
         for (texture = (W3D_Texture*)context->restex.mlh_Head ; texture->link.ln_Succ != NULL ; texture = (W3D_Texture*)texture->link.ln_Succ ) {
             ((VC4D_Texture*)texture)->texenv = envparam;
             if (envcolor)

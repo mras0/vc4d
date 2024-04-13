@@ -122,6 +122,8 @@ _breg-1
 .set fG,a_alloc()
 .set fB,a_alloc()
 
+.set cEnvColor,a_alloc()
+
 .set fMask,a_alloc()
 .set iDestColor,a_alloc()
 

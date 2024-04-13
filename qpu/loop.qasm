@@ -48,6 +48,9 @@
     mov         fva1,unif
     mov         fva2,unif
 
+    # XXX TEMP TEMP TEMP (for W3D_BLEND)
+    mov         cEnvColor,-1
+
     # Adjust w0/w1/w2 row elements (for SIMD)
 
     itof        r0,elem_num         # r0 = float(elem_num)

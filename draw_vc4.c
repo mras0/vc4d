@@ -56,9 +56,22 @@ static inline uint32_t lef32(float f)
     return LE32(*(uint32_t*)&f);
 }
 
+static uint32_t pack_color_elem(float f)
+{
+    return f < 0 ? 0 : f > 1 ? 255 : (uint32_t)(f * 255.0f + 0.5f);
+}
+
+static inline uint32_t pack_color(const W3D_Color* c)
+{
+    return pack_color_elem(c->a) << 24 | pack_color_elem(c->r) << 16 | pack_color_elem(c->g) << 8 | pack_color_elem(c->b);
+}
+
 void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex* v1, const vertex* v2)
 {
-    W3D_Context* wctx = &ctx->w3d;
+    if (!ctx->cur_shader)
+        return;
+
+    const ULONG ident = ctx->cur_shader->ident;
 
     float area2 = orient2d(v0, v1, v2);
     if (area2 < 0) {
@@ -69,6 +82,7 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
         area2 = -area2;
     }
 
+    W3D_Context* wctx = &ctx->w3d;
     int minX = imax(wctx->scissor.left,                       ftoi(fmin3(v0->x, v1->x, v2->x)));
     int maxX = imin(wctx->scissor.left + wctx->scissor.width, ftoi(fmax3(v0->x, v1->x, v2->x)));
     int minY = imax(wctx->scissor.top,                        ftoi(fmin3(v0->y, v1->y, v2->y)));
@@ -126,6 +140,9 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     VARYING(g);
     VARYING(b);
     VARYING(a);
+
+    // TODO:
+    // unif[idx++] = LE32(pack_color(&ctx->cur_tex->envcolor));
 #undef VARYING
     ctx->uniform_offset = idx - 1;
     ++*unif;
@@ -137,17 +154,27 @@ static const uint32_t qpu_loop[] = {
 static const uint32_t qpu_body[] = {
 #include "body.h"
 };
+
+// Interpolation / texture lookup
 static const uint32_t qpu_tex_lookup_wrap[] = {
 #include "tex_lookup_wrap.h"
 };
+static const uint32_t qpu_interp_color[] = {
+#include "interp_color.h"
+};
+
+// TexEnv
 static const uint32_t qpu_modulate[] = {
 #include "w3d_modulate.h"
+};
+static const uint32_t qpu_decal[] = {
+#include "w3d_decal.h"
 };
 static const uint32_t qpu_replace[] = {
 #include "w3d_replace.h"
 };
-static const uint32_t qpu_interp_color[] = {
-#include "interp_color.h"
+static const uint32_t qpu_blend[] = {
+#include "w3d_blend.h"
 };
 
 #define IS_BRANCH(x) ((x) >> 28 == 15)
@@ -201,10 +228,14 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
             case W3D_REPLACE:
                 COPY_CODE(qpu_replace);
                 break;
-            //case W3D_DECAL:
+            case W3D_DECAL:
+                COPY_CODE(qpu_decal);
+                break;
             case W3D_MODULATE:
-            //case W3D_BLEND:
                 COPY_CODE(qpu_modulate);
+                break;
+            case W3D_BLEND:
+                COPY_CODE(qpu_blend);
                 break;
         }
     }
@@ -303,8 +334,11 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
         ctx->texinfo[1] = LE32(1);
         ctx->texinfo[2] = LE32(1);
     }
+    ctx->cur_tex = tex;
 }
 
+// TODO: Save shader in uniform stream to allow batching with different shaders
+// TODO: Allow overlap of rendering and normal functions
 
 void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
 {

@@ -40,6 +40,8 @@ else()
     qasm(tex_lookup_wrap)
     qasm(w3d_modulate)
     qasm(w3d_replace)
+    qasm(w3d_decal)
+    qasm(w3d_blend)
     set(DRAW_FILES
         vc4.c
         draw_vc4.c
