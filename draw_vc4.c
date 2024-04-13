@@ -8,8 +8,9 @@
 // Tex repeat/clamp: 2*2 (2 bits)
 // Blend modes: 16*16 (8 bits) though to all are valid
 
-#define IDENT_MASK_INTERP_UV      (1 << 0)
-#define IDENT_MASK_INTERP_COLOR   (1 << 1)
+#define IDENT_MASK_INTERP_Z       (1 << 0)
+#define IDENT_MASK_INTERP_UV      (1 << 1)
+#define IDENT_MASK_INTERP_COLOR   (1 << 2)
 
 #define IDENT_TEXENV_SHIFT        16 // 2 bits mapped from 1..4 to 0..3
 #define IDENT_GET_TEXENV(ident)     ((ident >> IDENT_TEXENV_SHIFT) + 1)
@@ -130,6 +131,11 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     unif[idx++] = lef32((v2->n - v0->n) * invarea2)
     VARYING(w);
 
+    if (ident & IDENT_MASK_INTERP_Z) {
+        unif[idx++] = LE32(PHYS_TO_BUS((ULONG)ctx->zbuffer_mem.busaddr + 4*minX + wctx->bprow*(minY + wctx->yoffset)));
+        VARYING(z);
+    }
+
     if (ident & IDENT_MASK_INTERP_UV) {
         unif[idx++] = ctx->texinfo[0]; // tex addr
         unif[idx++] = ctx->texinfo[1]; // tex w
@@ -155,14 +161,24 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
 static const uint32_t qpu_outer_loop[] = {
 #include "outer_loop.h"
 };
-static const uint32_t qpu_loop[] = {
-#include "loop.h"
-};
 static const uint32_t qpu_body[] = {
 #include "body.h"
 };
 
+static const uint32_t qpu_loop_z_none[] = {
+#include "loop_z_none.h"
+};
+static const uint32_t qpu_loop_z_less[] = {
+#include "loop_z_less.h"
+};
+
+
+//
 // Uniform loading
+//
+static const uint32_t qpu_load_z[] = {
+#include "load_z.h"
+};
 static const uint32_t qpu_load_tex[] = {
 #include "load_tex.h"
 };
@@ -196,7 +212,7 @@ static const uint32_t qpu_blend[] = {
 
 #define MERGE_COPY(name) do { for (uint32_t i = 0; i < sizeof(name)/sizeof(*name); ++i) *dest++ = LE32(name[i]); } while (0)
 
-static uint32_t* merge_code(uint32_t* dest, const uint32_t* body, unsigned body_icnt, ULONG ident)
+static uint32_t* merge_code(uint32_t* dest, const uint32_t* loop, uint32_t loop_icnt, const uint32_t* body, unsigned body_icnt, ULONG ident)
 {
     // Copy outer loop header
     const uint32_t* outer_loop = qpu_outer_loop;
@@ -212,14 +228,14 @@ static uint32_t* merge_code(uint32_t* dest, const uint32_t* body, unsigned body_
 
     uint32_t * const tri_loop_start = dest;
 
+    if (ident & IDENT_MASK_INTERP_Z)
+        MERGE_COPY(qpu_load_z);
     if (ident & IDENT_MASK_INTERP_UV)
         MERGE_COPY(qpu_load_tex);
     if (ident & IDENT_MASK_INTERP_COLOR)
         MERGE_COPY(qpu_load_color);
 
     uint32_t adjust = (body_icnt - 1) * 8; // -1 for marker
-    uint32_t loop_icnt = sizeof(qpu_loop) / 8;
-    const uint32_t* loop = qpu_loop;
     while (loop_icnt--) {
         uint32_t w0 = *loop++;
         uint32_t w1 = *loop++;
@@ -299,6 +315,7 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 }
 #undef COPY_CODE
 
+#define SET_LOOP(x) loop = x; loop_icnt = sizeof(x) / 8; shader_bytes += sizeof(x);
 
 static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 {
@@ -320,21 +337,31 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         FreeVec(s);
         return NULL;
     }
-    ULONG shader_bytes = sizeof(qpu_outer_loop) + sizeof(qpu_loop) + body_size;
+    ULONG shader_bytes = sizeof(qpu_outer_loop) + body_size;
+    if (ident & IDENT_MASK_INTERP_Z)
+        shader_bytes += sizeof(qpu_load_z);
     if (ident & IDENT_MASK_INTERP_UV)
         shader_bytes += sizeof(qpu_load_tex);
     if (ident & IDENT_MASK_INTERP_COLOR)
         shader_bytes += sizeof(qpu_load_color);
+
+    uint32_t loop_icnt;
+    const uint32_t* loop;
+
+    SET_LOOP(qpu_loop_z_none);
+
     int ret = vc4_mem_alloc(vc4d, &s->code_mem, shader_bytes);
     if (ret) {
         LOG_ERROR("Failed to allocate memory for shader code\n", ret);
         FreeVec(s);
         return NULL;
     }
-    merge_code(s->code_mem.hostptr, ctx->shader_temp, body_size / 8, ident);
+    merge_code(s->code_mem.hostptr, loop, loop_icnt, ctx->shader_temp, body_size / 8, ident);
     CacheClearE(s->code_mem.hostptr, shader_bytes, CACRF_ClearD);
     return s;
 }
+
+#undef SET_LOOP
 
 void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
 {

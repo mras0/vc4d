@@ -1,5 +1,16 @@
 .include "common.qinc"
 
+.const Z_BUFFER_DISABLED ,     0
+.const W3D_Z_NEVER       ,     1       # discard incoming pixel
+.const W3D_Z_LESS        ,     2       # draw, if value < Z(Z_Buffer)
+.const W3D_Z_GEQUAL      ,     3       # draw, if value >= Z(Z_Buffer)
+.const W3D_Z_LEQUAL      ,     4       # draw, if value <= Z(Z_Buffer)
+.const W3D_Z_GREATER     ,     5       # draw, if value > Z(Z_Buffer)
+.const W3D_Z_NOTEQUAL    ,     6       # draw, if value != Z(Z_Buffer)
+.const W3D_Z_EQUAL       ,     7       # draw, if value == Z(Z_Buffer)
+.const W3D_Z_ALWAYS      ,     8       # always draw
+
+
     # XXX TEMP TEMP TEMP (for W3D_BLEND)
     mov         cEnvColor,-1
 

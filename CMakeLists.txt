@@ -19,7 +19,7 @@ macro(qasm name)
     add_custom_command(
         OUTPUT ${dst}
         COMMAND ${VC4ASM} -C${dst} -V -v ${src}
-        DEPENDS ${src} ${ARGN} ${CMAKE_CURRENT_SOURCE_DIR}/qpu/common.qinc ${CMAKE_CURRENT_SOURCE_DIR}/qpu/vc4.qinc
+        DEPENDS ${src} ${ARGN} ${CMAKE_CURRENT_SOURCE_DIR}/qpu/common.qinc ${CMAKE_CURRENT_SOURCE_DIR}/qpu/vc4.qinc ${CMAKE_CURRENT_SOURCE_DIR}/qpu/loop_template.qasm
     )
     set(QASM_HEADERS ${QASM_HEADERS} ${dst})
 endmacro()
@@ -35,8 +35,10 @@ if (FALSE)
 else()
     add_definitions(-DPISTORM32)
     qasm(outer_loop)
-    qasm(loop)
+    qasm(loop_z_none)
+    qasm(loop_z_less)
     qasm(body)
+    qasm(load_z)
     qasm(load_tex)
     qasm(load_color)
     qasm(interp_color)

@@ -148,11 +148,12 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
     NewList((struct List*)&context->tex);
     NewList((struct List*)&context->restex);
 
-
     vctx->fixedcolor.r =
     vctx->fixedcolor.g =
     vctx->fixedcolor.b =
     vctx->fixedcolor.a = 1.0f;
+
+    vctx->zmode = W3D_Z_LESS;
 
 #ifdef PISTORM32
     int res = vc4_mem_alloc(vc4d, &vctx->uniform_mem, VC4_UNIFORM_MEM_SIZE);
@@ -670,6 +671,7 @@ static void init_vertex(vertex* v, const W3D_Vertex* w, BOOL perspective)
 
     if (perspective) {
         v->w = w->w; // 1->0f / w->z;
+        v->z = w->z * v->w;
         v->u = w->u * v->w;
         v->v = w->v * v->w;
         v->r = w->color.r * v->w;
@@ -684,6 +686,8 @@ static void init_vertex(vertex* v, const W3D_Vertex* w, BOOL perspective)
         v->g = w->color.g;
         v->b = w->color.b;
         v->a = w->color.a;
+        // Last to avoid amiga-gcc bug (It seems to think fsmoved (a1)+,fp0 only increments a1 by 4..)
+        v->z = w->z;
     }
 }
 
@@ -931,13 +935,25 @@ W3D_ReadZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y __
     return W3D_SUCCESS;
 }
 
-ULONG
-W3D_SetZCompareMode(     W3D_Context * context __asm("a0"),
-     ULONG mode __asm("d1"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_SetZCompareMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    if (mode < W3D_Z_NEVER || mode > W3D_Z_ALWAYS) {
+        LOG_ERROR("%s: Invalid mode %lu\n", __func__, mode);
+        return W3D_ILLEGALINPUT;
+    }
+    const char* const mode_string[8] = {
+        "W3D_Z_NEVER",
+        "W3D_Z_LESS",
+        "W3D_Z_GEQUAL",
+        "W3D_Z_LEQUAL",
+        "W3D_Z_GREATER",
+        "W3D_Z_NOTEQUAL",
+        "W3D_Z_EQUAL",
+        "W3D_Z_ALWAYS",
+    };
+    LOG_DEBUG("%s: TODO support %s\n", __func__, mode_string[mode - 1]);
+    ((VC4D_Context*)context)->zmode = mode;
+    return W3D_SUCCESS;
 }
 
 ULONG

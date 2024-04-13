@@ -62,6 +62,8 @@ typedef struct VC4D_Context {
     ULONG width;
     ULONG height;
 
+    ULONG zmode;
+
 #ifdef PISTORM32
     vc4_mem uniform_mem;
     ULONG uniform_offset;

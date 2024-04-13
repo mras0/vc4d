@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 typedef struct vertex {
-    float x, y, w;
+    float x, y, z, w;
     float r, g, b, a;
     float u, v;
 } vertex;

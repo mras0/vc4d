@@ -122,12 +122,15 @@ _breg-1
 .set fG,a_alloc()
 .set fB,a_alloc()
 
+.set iZBufAddr,a_alloc()
+.set iZBufPtr,a_alloc()
+.set fvz0,b_alloc()
+.set fvz1,b_alloc()
+.set fvz2,b_alloc()
+
 .set cEnvColor,a_alloc()
 
 .set fMask,a_alloc()
 .set iDestColor,a_alloc()
 
 .set aTemp0,a_alloc()
-.set bTemp0,b_alloc()
-
-
