@@ -1,0 +1,13 @@
+.include "common.qinc"
+    mov         fvr0,unif
+    mov         fvr1,unif
+    mov         fvr2,unif
+    mov         fvg0,unif
+    mov         fvg1,unif
+    mov         fvg2,unif
+    mov         fvb0,unif
+    mov         fvb1,unif
+    mov         fvb2,unif
+    mov         fva0,unif
+    mov         fva1,unif
+    mov         fva2,unif

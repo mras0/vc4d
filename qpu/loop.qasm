@@ -1,53 +1,5 @@
 .include "common.qinc"
 
-# TODO: A number of registers aren't live at the same time in the innerloop
-
-    mov         iNumTriangles,unif
-
-:triloop
-
-    # Fetch uniforms
-    mov         iXSteps,unif
-    mov         iYSteps,unif
-    mov         iScreenAddr,unif
-    mov         iScreenDelta,unif
-    mov         fA01,unif
-    mov         fA12,unif
-    mov         fA20,unif
-    mov         fB01,unif
-    mov         fB12,unif
-    mov         fB20,unif
-    mov         fW0_row,unif
-    mov         fW1_row,unif
-    mov         fW2_row,unif
-    mov         fvw0,unif
-    mov         fvw1,unif
-    mov         fvw2,unif
-
-
-    mov         iTexAddr,unif
-    mov         iTexWidth,unif
-    mov         iTexHeight,unif
-    mov         fvu0,unif
-    mov         fvu1,unif
-    mov         fvu2,unif
-    mov         fvv0,unif
-    mov         fvv1,unif
-    mov         fvv2,unif
-
-    mov         fvr0,unif
-    mov         fvr1,unif
-    mov         fvr2,unif
-    mov         fvg0,unif
-    mov         fvg1,unif
-    mov         fvg2,unif
-    mov         fvb0,unif
-    mov         fvb1,unif
-    mov         fvb2,unif
-    mov         fva0,unif
-    mov         fva1,unif
-    mov         fva2,unif
-
     # XXX TEMP TEMP TEMP (for W3D_BLEND)
     mov         cEnvColor,-1
 
@@ -133,20 +85,5 @@
     mov         fW1,fW1_row # delay slot 2
     mov         fW2,fW2_row # delay slot 3
 
-    nop
-    nop
 
-    sub.setf    iNumTriangles,iNumTriangles,1
-    brr.anynz   -,:triloop
-
-    nop         # delay slot 1
-    nop         # delay slot 2
-    nop         # delay slot 3
-
-    mov         -,vw_wait
-
-# end
-    mov interrupt, 1    # End when running via MBox interface
-    nop; thrend         # Or running directly
-    nop
-    nop
+# Triangle loop end

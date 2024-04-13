@@ -130,16 +130,20 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     unif[idx++] = lef32((v2->n - v0->n) * invarea2)
     VARYING(w);
 
-    unif[idx++] = ctx->texinfo[0]; // tex addr
-    unif[idx++] = ctx->texinfo[1]; // tex w
-    unif[idx++] = ctx->texinfo[2]; // tex h
-    VARYING(u);
-    VARYING(v);
+    if (ident & IDENT_MASK_INTERP_UV) {
+        unif[idx++] = ctx->texinfo[0]; // tex addr
+        unif[idx++] = ctx->texinfo[1]; // tex w
+        unif[idx++] = ctx->texinfo[2]; // tex h
+        VARYING(u);
+        VARYING(v);
+    }
 
-    VARYING(r);
-    VARYING(g);
-    VARYING(b);
-    VARYING(a);
+    if (ident & IDENT_MASK_INTERP_COLOR) {
+        VARYING(r);
+        VARYING(g);
+        VARYING(b);
+        VARYING(a);
+    }
 
     // TODO:
     // unif[idx++] = LE32(pack_color(&ctx->cur_tex->envcolor));
@@ -148,11 +152,22 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     ++*unif;
 }
 
+static const uint32_t qpu_outer_loop[] = {
+#include "outer_loop.h"
+};
 static const uint32_t qpu_loop[] = {
 #include "loop.h"
 };
 static const uint32_t qpu_body[] = {
 #include "body.h"
+};
+
+// Uniform loading
+static const uint32_t qpu_load_tex[] = {
+#include "load_tex.h"
+};
+static const uint32_t qpu_load_color[] = {
+#include "load_color.h"
 };
 
 // Interpolation / texture lookup
@@ -179,13 +194,35 @@ static const uint32_t qpu_blend[] = {
 
 #define IS_BRANCH(x) ((x) >> 28 == 15)
 
-static uint32_t* merge_code(uint32_t* dest, const uint32_t* loop, unsigned loop_icnt, const uint32_t* body, unsigned body_icnt)
+#define MERGE_COPY(name) do { for (uint32_t i = 0; i < sizeof(name)/sizeof(*name); ++i) *dest++ = LE32(name[i]); } while (0)
+
+static uint32_t* merge_code(uint32_t* dest, const uint32_t* body, unsigned body_icnt, ULONG ident)
 {
-    const uint32_t adjust = (body_icnt - 1) * 8; // -1 for marker
+    // Copy outer loop header
+    const uint32_t* outer_loop = qpu_outer_loop;
+    uint32_t outer_loop_cnt = sizeof(qpu_outer_loop) / 8;
+    while (outer_loop_cnt--) {
+        uint32_t w0 = *outer_loop++;
+        uint32_t w1 = *outer_loop++;
+        if (w0 == UINT32_MAX && w1 == UINT32_MAX) // Marker
+            break;
+        *dest++ = LE32(w0);
+        *dest++ = LE32(w1);
+    }
+
+    uint32_t * const tri_loop_start = dest;
+
+    if (ident & IDENT_MASK_INTERP_UV)
+        MERGE_COPY(qpu_load_tex);
+    if (ident & IDENT_MASK_INTERP_COLOR)
+        MERGE_COPY(qpu_load_color);
+
+    uint32_t adjust = (body_icnt - 1) * 8; // -1 for marker
+    uint32_t loop_icnt = sizeof(qpu_loop) / 8;
+    const uint32_t* loop = qpu_loop;
     while (loop_icnt--) {
-        uint32_t w0 = loop[0];
-        uint32_t w1 = loop[1];
-        loop += 2;
+        uint32_t w0 = *loop++;
+        uint32_t w1 = *loop++;
 
         if (w0 == UINT32_MAX && w1 == UINT32_MAX) {
             for (unsigned i = 0; i < body_icnt * 2; ++i)
@@ -201,6 +238,20 @@ static uint32_t* merge_code(uint32_t* dest, const uint32_t* loop, unsigned loop_
                 w0 += adjust;
         }
 
+        *dest++ = LE32(w0);
+        *dest++ = LE32(w1);
+    }
+
+    adjust = (dest - tri_loop_start) * 4 - 8; // - 8 for marker
+    while (outer_loop_cnt--) {
+        uint32_t w0 = *outer_loop++;
+        uint32_t w1 = *outer_loop++;
+        if (IS_BRANCH(w1)) {
+            if ((int32_t)w0 < 0)
+                w0 -= adjust;
+            else
+                w0 += adjust;
+        }
         *dest++ = LE32(w0);
         *dest++ = LE32(w1);
     }
@@ -269,14 +320,18 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         FreeVec(s);
         return NULL;
     }
-    ULONG shader_bytes = sizeof(qpu_loop) + body_size;
+    ULONG shader_bytes = sizeof(qpu_outer_loop) + sizeof(qpu_loop) + body_size;
+    if (ident & IDENT_MASK_INTERP_UV)
+        shader_bytes += sizeof(qpu_load_tex);
+    if (ident & IDENT_MASK_INTERP_COLOR)
+        shader_bytes += sizeof(qpu_load_color);
     int ret = vc4_mem_alloc(vc4d, &s->code_mem, shader_bytes);
     if (ret) {
         LOG_ERROR("Failed to allocate memory for shader code\n", ret);
         FreeVec(s);
         return NULL;
     }
-    merge_code(s->code_mem.hostptr, qpu_loop, sizeof(qpu_loop) / 8, ctx->shader_temp, body_size / 8);
+    merge_code(s->code_mem.hostptr, ctx->shader_temp, body_size / 8, ident);
     CacheClearE(s->code_mem.hostptr, shader_bytes, CACRF_ClearD);
     return s;
 }

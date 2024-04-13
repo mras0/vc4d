@@ -426,6 +426,12 @@ static inline ULONG Expand4_8(ULONG val)
     return val << 4 | val;
 }
 
+static inline ULONG Expand5_8(ULONG val)
+{
+    val &= 0x1f;
+    return val << 3 | val >> 2;
+}
+
 W3D_Texture *
 W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), struct TagItem * ATOTags __asm("a2"), VC4D* vc4d __asm("a6"))
 {
@@ -524,6 +530,12 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
         while (n--) {
             UWORD val = *(UWORD*)s;
             *d++ = TEX_ENDIAN(Expand4_8(val >> 12) << 24 | Expand4_8(val >> 8) << 16 | Expand4_8(val >> 4) << 8 | Expand4_8(val));
+            s += 2;
+        }
+    } else if (format == W3D_A1R5G5B5) {
+        while (n--) {
+            UWORD val = *(UWORD*)s;
+            *d++ = TEX_ENDIAN((val & 0x8000 ? 255 : 0) << 24 | Expand5_8(val >> 10) << 16 | Expand5_8(val >> 5) << 8 | Expand5_8(val));
             s += 2;
         }
     } else {
