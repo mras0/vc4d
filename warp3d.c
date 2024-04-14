@@ -450,15 +450,16 @@ W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __asm("a1"), st
     const ULONG palette    = GetTagData(W3D_ATO_PALETTE    , 0, ATOTags);        /* texture palette */
     const ULONG usermip    = GetTagData(W3D_ATO_MIPMAPPTRS , 0, ATOTags);        /* array of user-supplied mipmaps */
 
-    //LOG_DEBUG("W3D_AllocTexObj\n");
-    //LOG_VAL(image  );
-    ////LOG_VAL(format );
-    //LOG_DEBUG("  %-20s = 0x%08lx (%s)\n", "format", format, format <= W3D_R8G8B8A8 ? FormatNames[format] : "<Invalid>");
-    //LOG_VAL(width  );
-    //LOG_VAL(height );
-    //LOG_VAL(mimap  );
-    //LOG_VAL(palette);
-    //LOG_VAL(usermip);
+#if 0
+    LOG_DEBUG("W3D_AllocTexObj\n");
+    LOG_VAL(image  );
+    LOG_DEBUG("  %-20s = 0x%08lx (%s)\n", "format", format, format <= W3D_R8G8B8A8 ? FormatNames[format] : "<Invalid>");
+    LOG_VAL(width  );
+    LOG_VAL(height );
+    LOG_VAL(mimap  );
+    LOG_VAL(palette);
+    LOG_VAL(usermip);
+#endif
     LOG_DEBUG("%s: %lux%lu %s\n", __func__, width, height, format <= W3D_R8G8B8A8 ? FormatNames[format] : "<Invalid>");
     if (mimap || usermip)
         LOG_DEBUG("%s: TODO support mipmaps\n");
