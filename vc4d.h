@@ -17,7 +17,7 @@
 #define VC4D_STR(x) VC4D_XSTR(x)
 #define VC4D_XSTR(x) #x
 
-#define BATCH_MAX_TRINAGLES (64)
+#define BATCH_MAX_TRINAGLES (512)
 
 #define VC4_SHADER_MEM_SIZE (64*1024)
 #define VC4_UNIFORM_MEM_SIZE (BATCH_MAX_TRINAGLES*64*4) // Assume 64 uniforms/tri (very conservative)

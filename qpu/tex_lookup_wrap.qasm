@@ -17,4 +17,3 @@
     add         t0s,r0,iTexAddr
     ldtmu0
 
-

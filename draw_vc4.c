@@ -12,9 +12,13 @@
 #define IDENT_MASK_INTERP_UV      (1 << 1)
 #define IDENT_MASK_INTERP_COLOR   (1 << 2)
 
-#define IDENT_TEXENV_SHIFT        16 // 2 bits mapped from 1..4 to 0..3
-#define IDENT_GET_TEXENV(ident)     ((ident >> IDENT_TEXENV_SHIFT) + 1)
-#define IDENT_SET_TEXENV(texenv)    ((texenv - 1) << IDENT_TEXENV_SHIFT)
+#define IDENT_ZMODE_SHIFT           13 // 3 bits mapped from 1..8 to 0..7
+#define IDENT_GET_ZMODE(ident)      (((ident) >> IDENT_ZMODE_SHIFT) + 1)
+#define IDENT_SET_ZMODE(texenv)     (((texenv) - 1) << IDENT_ZMODE_SHIFT)
+
+#define IDENT_TEXENV_SHIFT          16 // 2 bits mapped from 1..4 to 0..3
+#define IDENT_GET_TEXENV(ident)     (((ident) >> IDENT_TEXENV_SHIFT) + 1)
+#define IDENT_SET_TEXENV(texenv)    (((texenv) - 1) << IDENT_TEXENV_SHIFT)
 
 #define XSTEP 16
 
@@ -72,16 +76,16 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     if (!ctx->cur_shader)
         return;
 
-    const ULONG ident = ctx->cur_shader->ident;
-
+    // TODO: Back face culling
     float area2 = orient2d(v0, v1, v2);
     if (area2 < 0) {
-        // TODO: Back face culling
         const vertex* t = v0;
         v0 = v2;
         v2 = t;
         area2 = -area2;
     }
+
+    const ULONG ident = ctx->cur_shader->ident;
 
     W3D_Context* wctx = &ctx->w3d;
     int minX = imax(wctx->scissor.left,                       ftoi(fmin3(v0->x, v1->x, v2->x)));
@@ -94,6 +98,11 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
 
     minX = minX & ~(XSTEP - 1);
     maxX = (maxX + (XSTEP - 1)) & ~(XSTEP - 1);
+
+    // Ensure QPUs are tied to rows (so they can't step on each others toes)
+    int mod = minY % VC4_MAX_QPUS;
+    if (mod)
+        minY -= mod;
 
     const float A01 = v0->y - v1->y, B01 = v1->x - v0->x;
     const float A12 = v1->y - v2->y, B12 = v2->x - v1->x;
@@ -132,7 +141,7 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     VARYING(w);
 
     if (ident & IDENT_MASK_INTERP_Z) {
-        unif[idx++] = LE32(PHYS_TO_BUS((ULONG)ctx->zbuffer_mem.busaddr + 4*minX + wctx->bprow*(minY + wctx->yoffset)));
+        unif[idx++] = LE32((ULONG)ctx->zbuffer_mem.busaddr + 4*minX + wctx->bprow*minY);
         VARYING(z);
     }
 
@@ -315,7 +324,7 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 }
 #undef COPY_CODE
 
-#define SET_LOOP(x) loop = x; loop_icnt = sizeof(x) / 8; shader_bytes += sizeof(x);
+#define SET_LOOP(x) do { loop = x; loop_icnt = sizeof(x) / 8; shader_bytes += sizeof(x); } while (0)
 
 static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 {
@@ -348,7 +357,13 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     uint32_t loop_icnt;
     const uint32_t* loop;
 
-    SET_LOOP(qpu_loop_z_none);
+    // TODO: Use IDENT_GET_ZMODE
+    if (ident & IDENT_MASK_INTERP_Z) {
+        LOG_DEBUG("Creating shader for ZMode = %lu\n", IDENT_GET_ZMODE(ident));
+        SET_LOOP(qpu_loop_z_less);
+    } else {
+        SET_LOOP(qpu_loop_z_none);
+    }
 
     int ret = vc4_mem_alloc(vc4d, &s->code_mem, shader_bytes);
     if (ret) {
@@ -377,7 +392,15 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
         mode &= ~W3D_TEXMAPPING;
     }
 
+    if (mode & W3D_ZBUFFER) {
+        if (!ctx->zbuffer_mem.busaddr) {
+            mode &= ~W3D_ZBUFFER;
+        }
+        // TODO: What about not having W3D_ZBUFFERUPDATE enabled??
+    }
 
+    if (mode & W3D_ZBUFFER)
+        ident |= IDENT_MASK_INTERP_Z | IDENT_SET_ZMODE(ctx->zmode);
     if (mode & W3D_GOURAUD)
         ident |= IDENT_MASK_INTERP_COLOR;
     if (mode & W3D_TEXMAPPING)
@@ -406,6 +429,7 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
     }
 
     if (tex) {
+        // XXX: This could be static for a whole batch of triangles (as long as the texture doesn't change of course)
         ctx->texinfo[0] = LE32(tex->texture_mem.busaddr);
         ctx->texinfo[1] = LE32(tex->w3d.texwidth);
         ctx->texinfo[2] = LE32(tex->w3d.texheight);
@@ -427,7 +451,7 @@ void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
     uint32_t* num_tri = (uint32_t*)ctx->uniform_mem.hostptr;
     if (*num_tri) {
         SYSBASE;
-        LOG_DEBUG("Drawing %lu triangles\n", *num_tri);
+        //LOG_DEBUG("Drawing %lu triangles\n", *num_tri);
         if (!ctx->cur_shader) {
             *num_tri = 0;
             ctx->uniform_offset = 0;

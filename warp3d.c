@@ -671,13 +671,15 @@ static void init_vertex(vertex* v, const W3D_Vertex* w, BOOL perspective)
 
     if (perspective) {
         v->w = w->w; // 1->0f / w->z;
-        v->z = w->z * v->w;
         v->u = w->u * v->w;
         v->v = w->v * v->w;
         v->r = w->color.r * v->w;
         v->g = w->color.g * v->w;
         v->b = w->color.b * v->w;
         v->a = w->color.a * v->w;
+        
+        //v->z = w->z * v->w;
+        v->z = w->z;
     } else {
         v->w = 1.0f;
         v->u = w->u;
@@ -714,8 +716,7 @@ W3D_DrawTriangle(W3D_Context * context __asm("a0"), W3D_Triangle * triangle __as
 
 #define VSWAP(a,b) do { vertex* t = a; a = b; b = t; } while (0)
 
-ULONG
-W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
+ULONG W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
 {
     if (triangles->vertexcount == 0)
         return W3D_SUCCESS;
@@ -729,6 +730,8 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
         LOG_ERROR("%s: Hardware not locked!\n", __func__);
         return W3D_UNSUPPORTED;
     }
+
+    TODO(__func__);
 
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
@@ -753,8 +756,7 @@ W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __as
     return W3D_SUCCESS;
 }
 
-ULONG
-W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
+ULONG W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
 {
     if (triangles->vertexcount == 0)
         return W3D_SUCCESS;
@@ -769,6 +771,8 @@ W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __
         return W3D_UNSUPPORTED;
     }
 
+    TODO(__func__);
+
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
     const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
@@ -776,6 +780,9 @@ W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triangles __
     init_vertex(&a, &triangles->v[0], perspective);
     init_vertex(&b, &triangles->v[1], perspective);
     init_vertex(&c, &triangles->v[2], perspective);
+
+
+    // XXX order
 
     draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     vertex* v1 = &a;
@@ -887,15 +894,22 @@ ULONG
 W3D_ClearZBuffer(W3D_Context * context __asm("a0"), W3D_Double * clearvalue __asm("a1"), VC4D* vc4d __asm("a6"))
 {
 #ifdef PISTORM32
+    // TODO: Use QPUs...
     VC4D_Context* vctx = (VC4D_Context*)context;
-    float* buffer = vctx->zbuffer_mem.hostptr;
+    ULONG* buffer = vctx->zbuffer_mem.hostptr;
     if (!buffer) {
         LOG_ERROR("%s: No zbuffer\n", __func__);
         return W3D_NOZBUFFER;
     }
-    const float val = *clearvalue;
+    union {
+        float f;
+        ULONG u;
+    } u = { .f = *clearvalue };
+    const ULONG val = LE32(u.u);
     for (ULONG i = vctx->width * vctx->height; i--; )
         *buffer++ = val;
+    SYSBASE;
+    CacheClearU();
 #endif
     return W3D_SUCCESS;
 }
@@ -914,7 +928,8 @@ W3D_ReadZPixel(     W3D_Context * context __asm("a0"),
 ULONG
 W3D_ReadZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y __asm("d1"), ULONG n __asm("d2"), W3D_Double * z __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-#ifdef PISTORM32
+#if 0
+    // TODO: NEed to byte swap
     VC4D_Context* vctx = (VC4D_Context*)context;
     float* buffer = vctx->zbuffer_mem.hostptr;
     if (!buffer) {
@@ -932,6 +947,7 @@ W3D_ReadZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y __
         *z++ = *buffer++;
 
 #endif
+    TODO(__func__);
     return W3D_SUCCESS;
 }
 
@@ -1127,7 +1143,8 @@ W3D_WriteZPixel(     W3D_Context * context __asm("a0"),
 void
 W3D_WriteZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y __asm("d1"), ULONG n __asm("d2"), W3D_Double * z __asm("a1"), UBYTE * masks __asm("a2"), VC4D* vc4d __asm("a6"))
 {
-#ifdef PISTORM32
+    // TODO: Byteswap...
+#if 0
     VC4D_Context* vctx = (VC4D_Context*)context;
     float* buffer = vctx->zbuffer_mem.hostptr;
     if (!buffer) {
@@ -1153,8 +1170,8 @@ W3D_WriteZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y _
         while (n--)
             *buffer++ = *z++;
     }
-
 #endif
+    TODO(__func__);
 }
 
 ULONG
@@ -1486,6 +1503,9 @@ W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), 
         }
     }
 
+    SYSBASE;
+    CacheClearU();
+
 
     return W3D_SUCCESS;
 }
@@ -1528,6 +1548,8 @@ W3D_DrawTriStripV(W3D_Context * context __asm("a0"), W3D_TrianglesV * triangles 
 
     const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
+
+#if 0
     init_vertex(&a, triangles->v[0], perspective);
     init_vertex(&b, triangles->v[1], perspective);
     init_vertex(&c, triangles->v[2], perspective);
@@ -1543,6 +1565,22 @@ W3D_DrawTriStripV(W3D_Context * context __asm("a0"), W3D_TrianglesV * triangles 
         // TODO: Consider order
         draw_triangle(vc4d, (VC4D_Context*)context, v1, v2, v3);
     }
+#else
+
+    for (int i = 0; i < triangles->vertexcount - 2; ++i) {
+        if (i & 1) {
+            init_vertex(&a, triangles->v[i + 1], perspective);
+            init_vertex(&b, triangles->v[i + 0], perspective);
+            init_vertex(&c, triangles->v[i + 2], perspective);
+        } else {
+            init_vertex(&a, triangles->v[i + 0], perspective);
+            init_vertex(&b, triangles->v[i + 1], perspective);
+            init_vertex(&c, triangles->v[i + 2], perspective);
+        }
+        draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+    }
+
+#endif
 
     return W3D_SUCCESS;
 }

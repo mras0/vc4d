@@ -3,6 +3,7 @@
 .set iXIncr,16
 .set fXIncr,16.0
 .set iNQPU,12
+
 .set iVPMShift,2 # Allocate 4 rows per QPU
 
 .set _areg,ra0
@@ -37,6 +38,7 @@ _breg-1
     mov vw_addr,addr
 .endm
 
+# N.B. first two-three must be OK to have in delay slot
 .macro start_load16h,addr
     # mpitch, rowlen, nrows, dma(vpitch, y, x)
     mov r0,qpu_num
@@ -127,6 +129,7 @@ _breg-1
 .set fvz0,b_alloc()
 .set fvz1,b_alloc()
 .set fvz2,b_alloc()
+.set fZVal,a_alloc()
 
 .set cEnvColor,a_alloc()
 
