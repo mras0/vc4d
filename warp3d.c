@@ -155,6 +155,9 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
 
     vctx->zmode = W3D_Z_LESS;
 
+    vctx->blend_srcmode = W3D_SRC_ALPHA;
+    vctx->blend_dstmode = W3D_ONE_MINUS_SRC_ALPHA;
+
 #ifdef PISTORM32
     int res = vc4_mem_alloc(vc4d, &vctx->uniform_mem, VC4_UNIFORM_MEM_SIZE);
     if (res) {
@@ -225,14 +228,14 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
         W3D_TEXMAPPING |
         W3D_PERSPECTIVE |
         W3D_GOURAUD |
-        /*W3D_ZBUFFER |
-        W3D_ZBUFFERUPDATE |*/
-//        W3D_BLENDING |
+        W3D_ZBUFFER |
+        W3D_ZBUFFERUPDATE |
+        W3D_BLENDING |
         /*W3D_FOGGING |*/
-        /*W3D_ANTI_POINT |*/
-        /*W3D_ANTI_LINE |*/
-        /*W3D_ANTI_POLYGON |*/
-        /*W3D_ANTI_FULLSCREEN |*/
+        W3D_ANTI_POINT |
+        W3D_ANTI_LINE |
+        W3D_ANTI_POLYGON |
+        W3D_ANTI_FULLSCREEN |
         W3D_DITHERING //|
         /*W3D_LOGICOP |*/
         /*W3D_STENCILBUFFER |*/
@@ -731,8 +734,6 @@ ULONG W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangle
         return W3D_UNSUPPORTED;
     }
 
-    TODO(__func__);
-
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
     const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
@@ -771,7 +772,7 @@ ULONG W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triang
         return W3D_UNSUPPORTED;
     }
 
-    TODO(__func__);
+    TODO(__func__); // XXX: See W3D_DrawTriStripV
 
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
@@ -809,12 +810,37 @@ W3D_SetAlphaMode(     W3D_Context * context __asm("a0"),
 }
 
 ULONG
-W3D_SetBlendMode(     W3D_Context * context __asm("a0"),
-     ULONG srcfunc __asm("d0"),
-     ULONG dstfunc __asm("d1"),
- VC4D* vc4d __asm("a6"))
+W3D_SetBlendMode(W3D_Context * context __asm("a0"), ULONG srcfunc __asm("d0"), ULONG dstfunc __asm("d1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    // 1..15
+    const char* const blend_mode_strings[15] = {
+        "W3D_ZERO",
+        "W3D_ONE",
+        "W3D_SRC_COLOR",
+        "W3D_DST_COLOR",
+        "W3D_ONE_MINUS_SRC_COLOR",
+        "W3D_ONE_MINUS_DST_COLOR",
+        "W3D_SRC_ALPHA",
+        "W3D_ONE_MINUS_SRC_ALPHA",
+        "W3D_DST_ALPHA",
+        "W3D_ONE_MINUS_DST_ALPHA",
+        "W3D_SRC_ALPHA_SATURATE",
+        "W3D_CONSTANT_COLOR",
+        "W3D_ONE_MINUS_CONSTANT_COLOR",
+        "W3D_CONSTANT_ALPHA",
+        "W3D_ONE_MINUS_CONSTANT_ALPHA",
+    };
+
+    if (srcfunc < W3D_ZERO || srcfunc > W3D_ONE_MINUS_CONSTANT_ALPHA ||
+            dstfunc < W3D_ZERO || dstfunc > W3D_ONE_MINUS_CONSTANT_ALPHA) {
+        LOG_ERROR("%s: Invalid blend mode %lu, %lu\n", __func__, srcfunc, dstfunc);
+        return W3D_ILLEGALINPUT;
+    }
+
+    ((VC4D_Context*)context)->blend_srcmode = srcfunc;
+    ((VC4D_Context*)context)->blend_dstmode = dstfunc;
+    if (srcfunc != W3D_SRC_ALPHA || dstfunc != W3D_ONE_MINUS_SRC_ALPHA)
+        LOG_DEBUG("%s: TODO %s, %s\n", __func__, blend_mode_strings[srcfunc-1], blend_mode_strings[dstfunc-1]);
     return W3D_SUCCESS;
 }
 
@@ -967,7 +993,8 @@ ULONG W3D_SetZCompareMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d
         "W3D_Z_EQUAL",
         "W3D_Z_ALWAYS",
     };
-    LOG_DEBUG("%s: TODO support %s\n", __func__, mode_string[mode - 1]);
+    if (mode != W3D_Z_LESS)
+        LOG_DEBUG("%s: TODO support %s\n", __func__, mode_string[mode - 1]);
     ((VC4D_Context*)context)->zmode = mode;
     return W3D_SUCCESS;
 }

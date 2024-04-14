@@ -47,6 +47,7 @@ else()
     qasm(w3d_replace)
     qasm(w3d_decal)
     qasm(w3d_blend)
+    qasm(blend_src_one_minus_src)
     set(DRAW_FILES
         vc4.c
         draw_vc4.c

@@ -21,4 +21,4 @@
 
     v8adds  r0,r1,r2            # r0 = As*Cs + (1-As) * Cp
 
-    mov     r0.8dsf,r4.8df      # output alpha = Cp.A
+    mov     r0.8dsf,fA          # output alpha = Cp.A

@@ -6,19 +6,28 @@
 // Z-compare: 8 (3 bits)
 // Tex env: 4 (2 bits)
 // Tex repeat/clamp: 2*2 (2 bits)
-// Blend modes: 16*16 (8 bits) though to all are valid
+// Blend modes: 16*16 (4 bits each -> 8 bits) though to all are valid
 
-#define IDENT_MASK_INTERP_Z       (1 << 0)
-#define IDENT_MASK_INTERP_UV      (1 << 1)
-#define IDENT_MASK_INTERP_COLOR   (1 << 2)
+#define IDENT_MASK_INTERP_Z         (1 << 0)
+#define IDENT_MASK_INTERP_UV        (1 << 1)
+#define IDENT_MASK_INTERP_COLOR     (1 << 2)
+#define IDENT_MASK_BLEND            (1 << 3)
 
 #define IDENT_ZMODE_SHIFT           13 // 3 bits mapped from 1..8 to 0..7
-#define IDENT_GET_ZMODE(ident)      (((ident) >> IDENT_ZMODE_SHIFT) + 1)
+#define IDENT_GET_ZMODE(ident)      ((((ident) >> IDENT_ZMODE_SHIFT) & 7) + 1)
 #define IDENT_SET_ZMODE(texenv)     (((texenv) - 1) << IDENT_ZMODE_SHIFT)
 
 #define IDENT_TEXENV_SHIFT          16 // 2 bits mapped from 1..4 to 0..3
-#define IDENT_GET_TEXENV(ident)     (((ident) >> IDENT_TEXENV_SHIFT) + 1)
+#define IDENT_GET_TEXENV(ident)     ((((ident) >> IDENT_TEXENV_SHIFT) & 3) + 1)
 #define IDENT_SET_TEXENV(texenv)    (((texenv) - 1) << IDENT_TEXENV_SHIFT)
+
+#define IDENT_BLEND_SRC_SHIFT       18
+#define IDENT_GET_BLEND_SRC(ident)  ((((ident) >> IDENT_BLEND_SRC_SHIFT) & 15) + 1)
+#define IDENT_SET_BLEND_SRC(mode)   (((mode) - 1) << IDENT_BLEND_SRC_SHIFT)
+
+#define IDENT_BLEND_DST_SHIFT       22
+#define IDENT_GET_BLEND_DST(ident)  ((((ident) >> IDENT_BLEND_DST_SHIFT) & 15) + 1)
+#define IDENT_SET_BLEND_DST(mode)   (((mode) - 1) << IDENT_BLEND_DST_SHIFT)
 
 #define XSTEP 16
 
@@ -217,6 +226,11 @@ static const uint32_t qpu_blend[] = {
 #include "w3d_blend.h"
 };
 
+// Alpha blending
+static const uint32_t qpu_blend_src_one_minus_src[] = {
+#include "blend_src_one_minus_src.h"
+};
+
 #define IS_BRANCH(x) ((x) >> 28 == 15)
 
 #define MERGE_COPY(name) do { for (uint32_t i = 0; i < sizeof(name)/sizeof(*name); ++i) *dest++ = LE32(name[i]); } while (0)
@@ -318,7 +332,9 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 
     // TODO: Flat/Gourand only shading
 
-    // TODO: Alpha blending
+    // TODO: Other blend modes
+    if (ident & IDENT_MASK_BLEND)
+        COPY_CODE(qpu_blend_src_one_minus_src);
 
     return code - (UBYTE*)&ctx->shader_temp;
 }
@@ -395,8 +411,10 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
     if (mode & W3D_ZBUFFER) {
         if (!ctx->zbuffer_mem.busaddr) {
             mode &= ~W3D_ZBUFFER;
+        } else {
+            if (!(mode & W3D_ZBUFFERUPDATE))
+                LOG_DEBUG("%s: TODO Z-Buffer without update!\n", __func__);
         }
-        // TODO: What about not having W3D_ZBUFFERUPDATE enabled??
     }
 
     if (mode & W3D_ZBUFFER)
@@ -405,6 +423,8 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
         ident |= IDENT_MASK_INTERP_COLOR;
     if (mode & W3D_TEXMAPPING)
         ident |= IDENT_MASK_INTERP_UV;
+    if (mode & W3D_BLENDING)
+        ident |= IDENT_MASK_BLEND | IDENT_SET_BLEND_SRC(ctx->blend_srcmode) | IDENT_SET_BLEND_DST(ctx->blend_dstmode);
 
     if (!ctx->cur_shader || ctx->cur_shader->ident != ident) {
         draw_flush(vc4d, ctx); // XXX
