@@ -17,11 +17,6 @@
 #define VC4D_STR(x) VC4D_XSTR(x)
 #define VC4D_XSTR(x) #x
 
-#define BATCH_MAX_TRINAGLES (512)
-
-#define VC4_SHADER_MEM_SIZE (64*1024)
-#define VC4_UNIFORM_MEM_SIZE (BATCH_MAX_TRINAGLES*64*4) // Assume 64 uniforms/tri (very conservative)
-
 #define LE32(x) __builtin_bswap32(x)
 
 static inline ULONG LE32F(float f)
@@ -51,7 +46,18 @@ typedef struct VC4D_Shader {
     vc4_mem code_mem;
 } VC4D_Shader;
 
+
 #define VC4D_SHADER_HASH_SIZE 64
+
+typedef struct VC4D_QPU_Job {
+    ULONG shader_bus;
+    ULONG num_uniforms;
+} VC4D_QPU_Job;
+
+// TODO: Maybe look into tweaking these numbers
+#define QPU_UNIFORMS_PER_JOB 1024
+#define QPU_NUM_JOBS 8
+
 #endif
 
 typedef struct VC4D_Context {
@@ -69,10 +75,15 @@ typedef struct VC4D_Context {
 
 #ifdef PISTORM32
     vc4_mem uniform_mem;
-    ULONG uniform_offset;
 
     ULONG shader_temp[512];
     VC4D_Shader* shader_hash[VC4D_SHADER_HASH_SIZE];
+
+    VC4D_QPU_Job jobs[QPU_NUM_JOBS];
+    ULONG cur_job;
+    ULONG last_done_job;
+    BOOL building_job;
+    BOOL running_job;
 
     ULONG texinfo[3];
     VC4D_Shader* cur_shader;
@@ -97,12 +108,16 @@ typedef struct VC4D_Texture {
 #define UTILBASE struct Library * const UtilityBase = vc4d->utilbase
 #define CGFXBASE struct Library* CyberGfxBase = vc4d->cgfxbase
 
-#if 1
+#if TRACE_LEVEL > 0
+#define LOG_ERROR(...) log_debug(vc4d, "*** ERROR: " __VA_ARGS__)
+#else
+#define LOG_ERROR(...)
+#endif
+
+#if TRACE_LEVEL > 1
 #define LOG_DEBUG(...) log_debug(vc4d, __VA_ARGS__)
-#define LOG_ERROR(...) log_debug(vc4d, "ERROR: " __VA_ARGS__)
 #else
 #define LOG_DEBUG(...)
-#define LOG_ERROR(...) log_debug(vc4d, "ERROR: " __VA_ARGS__)
 #endif
 
 extern void log_debug(VC4D* vc4d, const char* fmt, ...);

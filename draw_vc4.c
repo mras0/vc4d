@@ -80,6 +80,65 @@ static inline uint32_t pack_color(const W3D_Color* c)
     return pack_color_elem(c->a) << 24 | pack_color_elem(c->r) << 16 | pack_color_elem(c->g) << 8 | pack_color_elem(c->b);
 }
 
+#define JOB_QUEUE_EMPTY(ctx) ((ctx)->last_done_job == (ctx)->cur_job)
+#define JOB_QUEUE_FULL(ctx) ((ctx)->cur_job - (ctx)->last_done_job == QPU_NUM_JOBS)
+
+static void update_job_queue(VC4D* vc4d, VC4D_Context* ctx)
+{
+    if (ctx->running_job && !vc4_qpu_active(vc4d)) {
+        //LOG_DEBUG("%s: job %lu finished\n", __func__, ctx->last_done_job);
+        ctx->running_job = FALSE;
+        ++ctx->last_done_job;
+    }
+
+    if (JOB_QUEUE_EMPTY(ctx))
+        return;
+
+    if (!ctx->running_job) {
+        //LOG_DEBUG("%s: running job %lu\n", __func__, ctx->last_done_job);
+        VC4D_QPU_Job* job = &ctx->jobs[ctx->last_done_job % QPU_NUM_JOBS];
+        vc4_run_qpu(vc4d, VC4_MAX_QPUS, job->shader_bus, ctx->uniform_mem.busaddr + (ctx->last_done_job % QPU_NUM_JOBS) * QPU_UNIFORMS_PER_JOB * 4);
+        ctx->running_job = TRUE;
+    }
+}
+
+static void init_job(VC4D* vc4d, VC4D_Context* ctx)
+{
+    while (JOB_QUEUE_FULL(ctx)) {
+        LOG_DEBUG("%s: job queue is full\n", __func__);
+        update_job_queue(vc4d, ctx);
+    }
+
+    //LOG_DEBUG("%s: job %lu initialized\n", __func__, ctx->cur_job);
+    VC4D_QPU_Job* job = &ctx->jobs[ctx->cur_job % QPU_NUM_JOBS];
+    uint32_t* unif = ((uint32_t*)ctx->uniform_mem.hostptr) + (ctx->cur_job % QPU_NUM_JOBS) * QPU_UNIFORMS_PER_JOB;
+    job->num_uniforms = 0;
+    job->shader_bus = ctx->cur_shader->code_mem.busaddr;
+    unif[job->num_uniforms++] = 0; // Number of triangles
+    unif[job->num_uniforms++] = ctx->texinfo[0]; // tex addr
+    unif[job->num_uniforms++] = ctx->texinfo[1]; // tex w
+    unif[job->num_uniforms++] = ctx->texinfo[2]; // tex h
+    ctx->building_job = TRUE;
+}
+
+static void end_job(VC4D* vc4d, VC4D_Context* ctx)
+{
+    if (!ctx->building_job)
+        return;
+    ctx->building_job = FALSE;
+    // First uniform stores number of triangles
+    uint32_t* unif = ((uint32_t*)ctx->uniform_mem.hostptr) + (ctx->cur_job % QPU_NUM_JOBS) * QPU_UNIFORMS_PER_JOB;
+    if (!*unif || !ctx->cur_shader)
+        return;
+    //LOG_DEBUG("%s: job %lu queued %lu triangles\n", __func__, ctx->cur_job, *unif);
+    *unif = LE32(*unif);
+    VC4D_QPU_Job* job = &ctx->jobs[ctx->cur_job % QPU_NUM_JOBS];
+    SYSBASE;
+    CacheClearE(unif, sizeof(*unif) * job->num_uniforms, CACRF_ClearD);
+    ++ctx->cur_job;
+    update_job_queue(vc4d, ctx);
+}
+
 void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex* v1, const vertex* v2)
 {
     if (!ctx->cur_shader)
@@ -93,6 +152,22 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
         v2 = t;
         area2 = -area2;
     }
+
+    // Could use actual number of uniforms for check...
+    if (ctx->jobs[ctx->cur_job % QPU_NUM_JOBS].num_uniforms + 64 >= QPU_UNIFORMS_PER_JOB) {
+        //LOG_DEBUG("%s: Max job size reached\n", __func__);
+        end_job(vc4d, ctx);
+        init_job(vc4d, ctx);
+    } else {
+        update_job_queue(vc4d, ctx);
+    }
+    // N.B. end_job changes cur_job
+
+    const ULONG job_num = ctx->cur_job % QPU_NUM_JOBS;
+    VC4D_QPU_Job* job = &ctx->jobs[job_num];
+    uint32_t* const unif = ((uint32_t*)ctx->uniform_mem.hostptr) + job_num * QPU_UNIFORMS_PER_JOB;
+    uint32_t idx = job->num_uniforms;
+
 
     const ULONG ident = ctx->cur_shader->ident;
 
@@ -123,13 +198,6 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     const float w2_row = orient2d(v0, v1, &p);
     const float invarea2 = 1.0f / area2;
 
-    uint32_t* unif = ctx->uniform_mem.hostptr;
-    if (*unif >= BATCH_MAX_TRINAGLES)
-        draw_flush(vc4d, ctx);
-
-
-    uint32_t idx = 1 + ctx->uniform_offset;
-
     unif[idx++] = LE32((maxX - minX) / XSTEP);
     unif[idx++] = LE32((maxY - minY + (VC4_MAX_QPUS - 1)) / VC4_MAX_QPUS);
     unif[idx++] = LE32(PHYS_TO_BUS((ULONG)wctx->vmembase + 4*minX + wctx->bprow*(minY + wctx->yoffset)));
@@ -155,9 +223,6 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     }
 
     if (ident & IDENT_MASK_INTERP_UV) {
-        unif[idx++] = ctx->texinfo[0]; // tex addr
-        unif[idx++] = ctx->texinfo[1]; // tex w
-        unif[idx++] = ctx->texinfo[2]; // tex h
         VARYING(u);
         VARYING(v);
     }
@@ -172,8 +237,8 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     // TODO:
     // unif[idx++] = LE32(pack_color(&ctx->cur_tex->envcolor));
 #undef VARYING
-    ctx->uniform_offset = idx - 1;
-    ++*unif;
+    job->num_uniforms = idx;
+    ++*unif; // Increment number of triangles
 }
 
 static const uint32_t qpu_outer_loop[] = {
@@ -345,6 +410,22 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 {
     LOG_DEBUG("Compiling shader for ident=0x%lx\n", ident);
+    if (ident & IDENT_MASK_INTERP_Z) {
+        LOG_DEBUG("\tInterpolate Z, Mode=%lu\n", IDENT_GET_ZMODE(ident));
+    }
+    if (ident & IDENT_MASK_INTERP_UV) {
+        LOG_DEBUG("\tInterpolate UV, TexEnv=%lu\n", IDENT_GET_TEXENV(ident));
+    }
+    if (ident & IDENT_MASK_INTERP_COLOR) {
+        LOG_DEBUG("\tInterpolate color\n");
+    }
+    if (ident & IDENT_MASK_INTERP_COLOR) {
+        LOG_DEBUG("\tInterpolate color\n");
+    }
+    if (ident & IDENT_MASK_BLEND) {
+        LOG_DEBUG("\tAlpha blend src=%lu dst=%lu\n", IDENT_GET_BLEND_SRC(ident), IDENT_GET_BLEND_DST(ident));
+    }
+
     SYSBASE;
     VC4D_Shader* s = AllocVec(sizeof(*s), MEMF_CLEAR|MEMF_PUBLIC);
     if (!s) {
@@ -387,8 +468,13 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         FreeVec(s);
         return NULL;
     }
-    merge_code(s->code_mem.hostptr, loop, loop_icnt, ctx->shader_temp, body_size / 8, ident);
+    uint32_t* end = merge_code(s->code_mem.hostptr, loop, loop_icnt, ctx->shader_temp, body_size / 8, ident);
+    if ((ULONG)end - (ULONG)s->code_mem.hostptr > shader_bytes) {
+        LOG_ERROR("Invalid shader size! %lu > %lu\n", (ULONG)end - (ULONG)s->code_mem.hostptr, shader_bytes);
+    }
+    LOG_DEBUG("Code merged\n");
     CacheClearE(s->code_mem.hostptr, shader_bytes, CACRF_ClearD);
+    LOG_DEBUG("Shader done\n");
     return s;
 }
 
@@ -409,12 +495,8 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
     }
 
     if (mode & W3D_ZBUFFER) {
-        if (!ctx->zbuffer_mem.busaddr) {
+        if (!ctx->zbuffer_mem.busaddr)
             mode &= ~W3D_ZBUFFER;
-        } else {
-            if (!(mode & W3D_ZBUFFERUPDATE))
-                LOG_DEBUG("%s: TODO Z-Buffer without update!\n", __func__);
-        }
     }
 
     if (mode & W3D_ZBUFFER)
@@ -426,8 +508,13 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
     if (mode & W3D_BLENDING)
         ident |= IDENT_MASK_BLEND | IDENT_SET_BLEND_SRC(ctx->blend_srcmode) | IDENT_SET_BLEND_DST(ctx->blend_dstmode);
 
+    int new_job = !ctx->building_job;
     if (!ctx->cur_shader || ctx->cur_shader->ident != ident) {
-        draw_flush(vc4d, ctx); // XXX
+        new_job = 1;
+
+        if ((mode & W3D_ZBUFFER) && !(mode & W3D_ZBUFFERUPDATE)) {
+            LOG_DEBUG("%s: TODO Z-Buffer without update!\n", __func__);
+        }
 
         ctx->cur_shader = NULL;
         for (VC4D_Shader* s = ctx->shader_hash[ident % VC4D_SHADER_HASH_SIZE]; s; s = s->next) {
@@ -444,46 +531,34 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
                 s->next = ctx->shader_hash[ident % VC4D_SHADER_HASH_SIZE];
                 ctx->shader_hash[ident % VC4D_SHADER_HASH_SIZE] = s;
                 ctx->cur_shader = s;
+            } else {
+                LOG_ERROR("Failed to make shader!\n");
             }
         }
     }
 
-    if (tex) {
-        // XXX: This could be static for a whole batch of triangles (as long as the texture doesn't change of course)
-        ctx->texinfo[0] = LE32(tex->texture_mem.busaddr);
-        ctx->texinfo[1] = LE32(tex->w3d.texwidth);
-        ctx->texinfo[2] = LE32(tex->w3d.texheight);
-    } else {
-        // XXX: TODO
-        //ctx->texinfo[0] = LE32(ctx->shader_mem.busaddr + ctx->shader_dummy_tex_offset);
-        ctx->texinfo[0] = LE32(ctx->uniform_mem.busaddr);
-        ctx->texinfo[1] = LE32(1);
-        ctx->texinfo[2] = LE32(1);
+    if (ctx->cur_tex != tex) {
+        new_job = 1;
+        if (tex) {
+            ctx->texinfo[0] = LE32(tex->texture_mem.busaddr);
+            ctx->texinfo[1] = LE32(tex->w3d.texwidth);
+            ctx->texinfo[2] = LE32(tex->w3d.texheight);
+        }
+        ctx->cur_tex = tex;
     }
-    ctx->cur_tex = tex;
-}
 
-// TODO: Save shader in uniform stream to allow batching with different shaders
-// TODO: Allow overlap of rendering and normal functions
+    if (new_job) {
+        end_job(vc4d, ctx);
+        init_job(vc4d, ctx);
+    }
+}
 
 void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
 {
-    uint32_t* num_tri = (uint32_t*)ctx->uniform_mem.hostptr;
-    if (*num_tri) {
-        SYSBASE;
-        //LOG_DEBUG("Drawing %lu triangles\n", *num_tri);
-        if (!ctx->cur_shader) {
-            *num_tri = 0;
-            ctx->uniform_offset = 0;
-            LOG_ERROR("No shader!\n");
-            return;
-        }
+    end_job(vc4d, ctx);
+    //LOG_DEBUG("%s: %lu jobs\n", __func__, ctx->cur_job - ctx->last_done_job);
 
-        *num_tri = LE32(*num_tri);
-        CacheClearE(ctx->uniform_mem.hostptr, 4*(1 + ctx->uniform_offset), CACRF_ClearD);
-        vc4_run_qpu(vc4d, VC4_MAX_QPUS, ctx->cur_shader->code_mem.busaddr, ctx->uniform_mem.busaddr);
-        vc4_wait_qpu(vc4d);
-        ctx->uniform_offset = 0;
-        *num_tri = 0;
-    }
+    // Empty job queue
+    while (!JOB_QUEUE_EMPTY(ctx))
+        update_job_queue(vc4d, ctx);
 }

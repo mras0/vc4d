@@ -298,7 +298,7 @@ void vc4_free(VC4D* vc4d)
         LOG_ERROR("Still %lu bytes allocated!\n", BytesAllocated);
     }
     int ret = qpu_enable(vc4d, 0);
-    LOG_DEBUG("qpu_enable(0) %ld\n", ret);
+    LOG_DEBUG("qpu_enable(0) %ld\n", ret); (void)ret;
 }
 
 
@@ -343,6 +343,17 @@ int vc4_mem_alloc(VC4D* vc4d, vc4_mem* m, unsigned size)
 
 static unsigned wait_num;
 
+int vc4_qpu_active(struct VC4D* vc4d)
+{
+    (void)vc4d;
+    if (!wait_num)
+        return 1;
+    if (((LE32(V3D_SRQCS)>>16) & 0xff) != wait_num)
+        return 1;
+    wait_num = 0; // signal completion
+    return 0;
+}
+
 int vc4_wait_qpu(struct VC4D* vc4d)
 {
     (void)vc4d;
@@ -358,9 +369,9 @@ int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigne
 {
     (void)vc4d;
     // This should never happen (uniform memory overwritten anyway)
-    //int ret = vc4_wait_qpu(vc4d);
-    //if (ret)
-    //   return ret;
+    if (wait_num) {
+        LOG_ERROR("%s called with QPUs running!\n", __func__);
+    }
 
     V3D_DBCFG  = LE32(0);       // Disallow IRQ
     V3D_DBQITE = LE32(0);       // Disable IRQ

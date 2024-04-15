@@ -6,6 +6,8 @@
 #define SERDAT  *((volatile uint16_t*)0xDFF030)
 #define SERPER  *((volatile uint16_t*)0xDFF032)
 
+#define BAUDRATE 345600
+
 static void ser_putch(UBYTE ch __asm("d0"), void* context __asm("a3"))
 {
     (void)context;
@@ -26,7 +28,7 @@ void log_debug(VC4D* vc4d, const char* fmt, ...)
     VFPrintf(out, fmt, (LONG*)&fmt + 1);
 #else
     SYSBASE;
-    SERPER = 30;
+    SERPER = (3546895 + BAUDRATE / 2) / BAUDRATE - 1;
     RawDoFmt(fmt, (LONG*)&fmt + 1, (APTR)&ser_putch, NULL);
 #endif
 }

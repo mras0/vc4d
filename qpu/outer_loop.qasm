@@ -3,6 +3,9 @@
 # TODO: A number of registers aren't live at the same time in the innerloop
 
     mov         iNumTriangles,unif
+    mov         iTexAddr,unif
+    mov         iTexWidth,unif
+    mov         iTexHeight,unif
 
     # Ensure color registers are loaded with sane values
     mov         fA,1.0
