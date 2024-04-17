@@ -64,6 +64,7 @@ static void NewList(struct List* l)
 
 ULONG W3D_FreeAllTexObj(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
 ULONG W3D_FreeZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
+void W3D_UnLockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"));
 
 static uint32_t NumContexts; // TEMP
 
@@ -74,6 +75,7 @@ void W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"
 
     if (context->HWlocked) {
         LOG_ERROR("W3D_DestroyContext: destryoing context with locked HW!\n");
+        W3D_UnLockHardware(context, vc4d);
     }
 
 #ifdef PISTORM32
@@ -177,6 +179,7 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
     vctx->fixedcolor.a = 1.0f;
 
     vctx->zmode = W3D_Z_LESS;
+    context->state |= W3D_ZBUFFERUPDATE;
 
     vctx->blend_srcmode = W3D_SRC_ALPHA;
     vctx->blend_dstmode = W3D_ONE_MINUS_SRC_ALPHA;
@@ -343,8 +346,7 @@ W3D_LockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
     return W3D_SUCCESS;
 }
 
-void
-W3D_UnLockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
+void W3D_UnLockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 {
     TRACE();
     if (context->HWlocked != W3D_TRUE) {
@@ -377,12 +379,21 @@ ULONG
 W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG destfmt __asm("d1"), VC4D* vc4d __asm("a6"))
 {
     // TODO: Pretend everything is supported for now
-#define QUERY(x) case x: LOG_DEBUG("%s: TODO %s\n", __func__, #x); break
+#if TRACE_LEVEL > 1
+#define QUERY(x) case x: { static int warned; if (!warned) { LOG_DEBUG("%s: TODO %s\n", __func__, #x); warned = 1; } } break
+#else
+#define QUERY(x) case x: break;
+#endif
     switch (query) {
         case W3D_Q_DRAW_TRIANGLE:
         case W3D_Q_TEXMAPPING:
         case W3D_Q_PERSPECTIVE:
         case W3D_Q_GOURAUDSHADING:
+        case W3D_Q_ZBUFFER:
+        case W3D_Q_ZBUFFERUPDATE:
+        case W3D_Q_BLENDING:
+        case W3D_Q_SRCFACTORS:
+        case W3D_Q_DESTFACTORS:
             break;
         case W3D_Q_MAXTEXWIDTH:
         case W3D_Q_MAXTEXHEIGHT:
@@ -414,14 +425,9 @@ W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG dest
     QUERY(W3D_Q_TEXMAPPING3D);
     QUERY(W3D_Q_CHROMATEST);
     QUERY(W3D_Q_FLATSHADING);
-    QUERY(W3D_Q_ZBUFFER);
-    QUERY(W3D_Q_ZBUFFERUPDATE);
     QUERY(W3D_Q_ZCOMPAREMODES);
     QUERY(W3D_Q_ALPHATEST);
     QUERY(W3D_Q_ALPHATESTMODES);
-    QUERY(W3D_Q_BLENDING);
-    QUERY(W3D_Q_SRCFACTORS);
-    QUERY(W3D_Q_DESTFACTORS);
     QUERY(W3D_Q_ONE_ONE);
     QUERY(W3D_Q_FOGGING);
     QUERY(W3D_Q_LINEAR);
@@ -926,6 +932,12 @@ W3D_SetBlendMode(W3D_Context * context __asm("a0"), ULONG srcfunc __asm("d0"), U
     };
 #endif
 
+//W3D_SRC_ALPHA, W3D_ONE
+//W3D_SRC_ALPHA, W3D_ONE_MINUS_SRC_COLOR
+//W3D_ZERO, W3D_ONE_MINUS_SRC_ALPHA
+//W3D_ZERO, W3D_ONE_MINUS_SRC_COLOR
+
+
     if (srcfunc < W3D_ZERO || srcfunc > W3D_ONE_MINUS_CONSTANT_ALPHA ||
             dstfunc < W3D_ZERO || dstfunc > W3D_ONE_MINUS_CONSTANT_ALPHA) {
         LOG_ERROR("%s: Invalid blend mode %lu, %lu\n", __func__, srcfunc, dstfunc);
@@ -934,7 +946,7 @@ W3D_SetBlendMode(W3D_Context * context __asm("a0"), ULONG srcfunc __asm("d0"), U
 
     ((VC4D_Context*)context)->blend_srcmode = srcfunc;
     ((VC4D_Context*)context)->blend_dstmode = dstfunc;
-    if (srcfunc != W3D_SRC_ALPHA || dstfunc != W3D_ONE_MINUS_SRC_ALPHA) {
+    if (srcfunc >= W3D_DST_ALPHA || dstfunc >= W3D_DST_ALPHA) {
         LOG_DEBUG("%s: TODO %s, %s\n", __func__, blend_mode_strings[srcfunc-1], blend_mode_strings[dstfunc-1]);
     }
     return W3D_SUCCESS;
@@ -1084,7 +1096,7 @@ ULONG W3D_SetZCompareMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d
         return W3D_ILLEGALINPUT;
     }
 #if TRACE_LEVEL > 1
-    if (mode != W3D_Z_LESS) {
+    if (mode != W3D_Z_LESS && mode != W3D_Z_LEQUAL) {
         const char* const mode_string[8] = {
             "W3D_Z_NEVER",
             "W3D_Z_LESS",
@@ -1435,7 +1447,8 @@ static BOOL ModeSupported(VC4D* vc4d, ULONG modeId)
     return d == 24 && bpp == 4 && fmt == PIXFMT_BGRA32;
 }
 
-static BOOL ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1"), struct ScreenModeRequester* req __asm("a2"))
+// N.B. don't return BOOL here, need to return complete value in D0
+ULONG ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1"), struct ScreenModeRequester* req __asm("a2"))
 {
     (void)req;
     struct ScreenModeHookData* ctx = hook->h_Data;
@@ -1460,7 +1473,6 @@ static BOOL ScreenModeHook(struct Hook* hook __asm("a0"), ULONG modeId __asm("a1
 
     return TRUE;
 }
-
 
 ULONG
 W3D_RequestMode(struct TagItem * taglist __asm("a0"), VC4D* vc4d __asm("a6"))
@@ -1626,7 +1638,8 @@ W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), 
         return W3D_UNSUPPORTED;
     }
 
-    // TODO: Optimize, and do correctly
+    // TODO: Optimize, want gneric QPU clear routine...
+    // Maybe just use W3D itself while backing up registers...
 
     uint32_t smodulo = context->bprow / sizeof(uint32_t);
     uint32_t* screen = (uint32_t*)context->vmembase + smodulo * context->yoffset;
@@ -1636,9 +1649,11 @@ W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), 
     const int clip_y0 = context->scissor.top;
     const int clip_y1 = context->scissor.top + context->scissor.height;
 
+    color = LE32(color);
+
     for (int y = clip_y0; y < clip_y1; ++y) {
         for (int x = clip_x0; x < clip_x1; ++x) {
-            screen[x + y * smodulo] = LE32(0xffff00ff);
+            screen[x + y * smodulo] = color;
         }
     }
 

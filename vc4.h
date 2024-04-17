@@ -36,5 +36,6 @@ void vc4_mem_free(struct VC4D* vc4d, vc4_mem* m);
 int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigned uniform_bus);
 int vc4_wait_qpu(struct VC4D* vc4d);
 int vc4_qpu_active(struct VC4D* vc4d);
+void vc4_report_perf(struct VC4D* vc4d);
 
 #endif

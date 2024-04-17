@@ -1,3 +1,7 @@
+.ifset COMMON_QINC_INCLUDED
+.else
+.const COMMON_QINC_INCLUDED,1
+
 .include "vc4.qinc"
 
 .set iXIncr,16
@@ -137,3 +141,17 @@ _breg-1
 .set iDestColor,a_alloc()
 
 .set aTemp0,a_alloc()
+
+######################################
+
+.const Z_BUFFER_DISABLED ,     0
+.const W3D_Z_NEVER       ,     1       # discard incoming pixel
+.const W3D_Z_LESS        ,     2       # draw, if value < Z(Z_Buffer)
+.const W3D_Z_GEQUAL      ,     3       # draw, if value >= Z(Z_Buffer)
+.const W3D_Z_LEQUAL      ,     4       # draw, if value <= Z(Z_Buffer)
+.const W3D_Z_GREATER     ,     5       # draw, if value > Z(Z_Buffer)
+.const W3D_Z_NOTEQUAL    ,     6       # draw, if value != Z(Z_Buffer)
+.const W3D_Z_EQUAL       ,     7       # draw, if value == Z(Z_Buffer)
+.const W3D_Z_ALWAYS      ,     8       # always draw
+
+.endif

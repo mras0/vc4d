@@ -27,6 +27,7 @@ macro(qasm name)
 endmacro()
 
 add_compile_options(-mregparm=4 -g3 -O2 -msmall-code -fomit-frame-pointer)
+#add_compile_options(-g3 -O2 -fomit-frame-pointer)
 add_compile_options(-Wall -Wextra -fno-strict-aliasing)
 
 # TODO: Make a CMake option for this
@@ -39,17 +40,33 @@ else()
     qasm(outer_loop)
     qasm(loop_z_none)
     qasm(loop_z_less)
+    qasm(loop_z_less_update)
+    qasm(loop_z_lequal)
+    qasm(loop_z_lequal_update)
     qasm(body)
     qasm(load_z)
     qasm(load_tex)
     qasm(load_color)
     qasm(interp_color)
     qasm(tex_lookup_wrap)
+    qasm(copy_interpolated_color)
+    # TexEnv
     qasm(w3d_modulate)
     qasm(w3d_replace)
     qasm(w3d_decal)
     qasm(w3d_blend)
-    qasm(blend_src_one_minus_src)
+    # BlendMode
+    qasm(alpha_blend)
+
+    qasm(w3d_zero)
+    qasm(w3d_one)
+    qasm(w3d_src_color)
+    qasm(w3d_dst_color)
+    qasm(w3d_one_minus_src_color)
+    qasm(w3d_one_minus_dst_color)
+    qasm(w3d_src_alpha)
+    qasm(w3d_one_minus_src_alpha)
+
     set(DRAW_FILES
         vc4.c
         draw_vc4.c

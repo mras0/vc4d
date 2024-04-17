@@ -43,6 +43,8 @@
 #define V3D_VPMBASE	*(volatile uint32_t*)(V3D_BASE+0x00504)	// VPM base (user) memory reservation
 #define V3D_PCTRC	*(volatile uint32_t*)(V3D_BASE+0x00670)	// Performance Counter Clear
 #define V3D_PCTRE	*(volatile uint32_t*)(V3D_BASE+0x00674)	// Performance Counter Enables
+#define V3D_PCTR(n) *(volatile uint32_t*)(V3D_BASE+0x00680+(n)*8)
+#define V3D_PCTRS(n) *(volatile uint32_t*)(V3D_BASE+0x00684+(n)*8)
 #define V3D_PCTR0	*(volatile uint32_t*)(V3D_BASE+0x00680)	// Performance Counter Count 0
 #define V3D_PCTRS0	*(volatile uint32_t*)(V3D_BASE+0x00684)	// Performance Counter Mapping 0
 #define V3D_PCTR1	*(volatile uint32_t*)(V3D_BASE+0x00688)	// Performance Counter Count 1

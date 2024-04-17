@@ -8,10 +8,11 @@
 // Tex repeat/clamp: 2*2 (2 bits)
 // Blend modes: 16*16 (4 bits each -> 8 bits) though to all are valid
 
-#define IDENT_MASK_INTERP_Z         (1 << 0)
-#define IDENT_MASK_INTERP_UV        (1 << 1)
-#define IDENT_MASK_INTERP_COLOR     (1 << 2)
-#define IDENT_MASK_BLEND            (1 << 3)
+#define IDENT_MASK_Z_TEST           (1 << 0)
+#define IDENT_MASK_Z_UPDATE         (1 << 1)
+#define IDENT_MASK_INTERP_UV        (1 << 2)
+#define IDENT_MASK_INTERP_COLOR     (1 << 3)
+#define IDENT_MASK_BLEND            (1 << 4)
 
 #define IDENT_ZMODE_SHIFT           13 // 3 bits mapped from 1..8 to 0..7
 #define IDENT_GET_ZMODE(ident)      ((((ident) >> IDENT_ZMODE_SHIFT) & 7) + 1)
@@ -105,7 +106,7 @@ static void update_job_queue(VC4D* vc4d, VC4D_Context* ctx)
 static void init_job(VC4D* vc4d, VC4D_Context* ctx)
 {
     while (JOB_QUEUE_FULL(ctx)) {
-        LOG_DEBUG("%s: job queue is full\n", __func__);
+        //LOG_DEBUG("%s: job queue is full\n", __func__);
         update_job_queue(vc4d, ctx);
     }
 
@@ -217,7 +218,7 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     unif[idx++] = lef32((v2->n - v0->n) * invarea2)
     VARYING(w);
 
-    if (ident & IDENT_MASK_INTERP_Z) {
+    if (ident & (IDENT_MASK_Z_TEST | IDENT_MASK_Z_UPDATE)) {
         unif[idx++] = LE32((ULONG)ctx->zbuffer_mem.busaddr + 4*minX + wctx->bprow*minY);
         VARYING(z);
     }
@@ -248,11 +249,27 @@ static const uint32_t qpu_body[] = {
 #include "body.h"
 };
 
+//
+// Loops (dependent on z-buffer mode)
+//
 static const uint32_t qpu_loop_z_none[] = {
 #include "loop_z_none.h"
 };
 static const uint32_t qpu_loop_z_less[] = {
 #include "loop_z_less.h"
+};
+static const uint32_t qpu_loop_z_less_update[] = {
+#include "loop_z_less_update.h"
+};
+static const uint32_t qpu_loop_z_lequal[] = {
+#include "loop_z_lequal.h"
+};
+static const uint32_t qpu_loop_z_lequal_update[] = {
+#include "loop_z_lequal_update.h"
+};
+
+static const uint32_t qpu_copy_interpolated_color[] = {
+#include "copy_interpolated_color.h"
 };
 
 
@@ -292,9 +309,36 @@ static const uint32_t qpu_blend[] = {
 };
 
 // Alpha blending
-static const uint32_t qpu_blend_src_one_minus_src[] = {
-#include "blend_src_one_minus_src.h"
+static const uint32_t qpu_alpha_blend[] = {
+#include "alpha_blend.h"
 };
+
+static const uint32_t qpu_w3d_zero[] = {
+#include "w3d_zero.h"
+};
+static const uint32_t qpu_w3d_one[] = {
+#include "w3d_one.h"
+};
+static const uint32_t qpu_w3d_src_color[] = {
+#include "w3d_src_color.h"
+};
+static const uint32_t qpu_w3d_dst_color[] = {
+#include "w3d_dst_color.h"
+};
+static const uint32_t qpu_w3d_one_minus_src_color[] = {
+#include "w3d_one_minus_src_color.h"
+};
+static const uint32_t qpu_w3d_one_minus_dst_color[] = {
+#include "w3d_one_minus_dst_color.h"
+};
+static const uint32_t qpu_w3d_src_alpha[] = {
+#include "w3d_src_alpha.h"
+};
+static const uint32_t qpu_w3d_one_minus_src_alpha[] = {
+#include "w3d_one_minus_src_alpha.h"
+};
+
+#define BLEND_MAX_INST 20 // XXX
 
 #define IS_BRANCH(x) ((x) >> 28 == 15)
 
@@ -316,7 +360,7 @@ static uint32_t* merge_code(uint32_t* dest, const uint32_t* loop, uint32_t loop_
 
     uint32_t * const tri_loop_start = dest;
 
-    if (ident & IDENT_MASK_INTERP_Z)
+    if (ident & (IDENT_MASK_Z_TEST | IDENT_MASK_Z_UPDATE))
         MERGE_COPY(qpu_load_z);
     if (ident & IDENT_MASK_INTERP_UV)
         MERGE_COPY(qpu_load_tex);
@@ -363,12 +407,31 @@ static uint32_t* merge_code(uint32_t* dest, const uint32_t* loop, uint32_t loop_
     return dest;
 }
 
-#define COPY_CODE(name) do { CopyMem(name, code, sizeof(name)); code += sizeof(name); } while (0)
+#define COPY_CODE(name) do { CopyMem(name, code, sizeof(name)); code += sizeof(name) / sizeof(*name); } while (0)
+
+static ULONG* mod_dst_func(ULONG* code, const ULONG* func, ULONG num_func_inst)
+{
+    while (num_func_inst--) {
+        uint32_t w0 = *func++;
+        uint32_t w1 = *func++;
+        // waddr_add / wradd_mul are in lower 12 bits of w1
+        // ACC2 (r2) is register 34, change to ACC3 (r3) register 35
+        // Only one of the two pipelines can (legally) write to r2
+        if (((w1 >> 6) & 0x3f) == 34)
+            w1 += 1 << 6;
+        else if ((w1 & 0x3f) == 34)
+            w1++;
+
+        *code++ = w0;
+        *code++ = w1;
+    }
+    return code;
+}
 
 static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 {
     SYSBASE;
-    UBYTE* code = (UBYTE*)ctx->shader_temp;
+    ULONG* code = ctx->shader_temp;
     COPY_CODE(qpu_body);
 
     if (ident & IDENT_MASK_INTERP_UV)
@@ -393,15 +456,59 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
                 COPY_CODE(qpu_blend);
                 break;
         }
+    } else {
+        // TODO: Handle flat shading
+        COPY_CODE(qpu_copy_interpolated_color);
     }
 
-    // TODO: Flat/Gourand only shading
+    if (ident & IDENT_MASK_BLEND) {
 
-    // TODO: Other blend modes
-    if (ident & IDENT_MASK_BLEND)
-        COPY_CODE(qpu_blend_src_one_minus_src);
+        const uint32_t* blend_main = qpu_alpha_blend;
+        uint32_t blend_ninst = sizeof(qpu_alpha_blend) / 8;
 
-    return code - (UBYTE*)&ctx->shader_temp;
+        while (blend_ninst--) {
+            uint32_t w0 = *blend_main++;
+            uint32_t w1 = *blend_main++;
+            if (w0 == UINT32_MAX && w1 == UINT32_MAX) // Marker
+                break;
+            *code++ = w0;
+            *code++ = w1;
+        }
+#define BLEND_MODES(X) \
+    X(W3D_ZERO                           , qpu_w3d_zero) \
+    X(W3D_ONE                            , qpu_w3d_one) \
+    X(W3D_SRC_COLOR                      , qpu_w3d_src_color) \
+    X(W3D_DST_COLOR                      , qpu_w3d_dst_color) \
+    X(W3D_ONE_MINUS_SRC_COLOR            , qpu_w3d_one_minus_src_color) \
+    X(W3D_ONE_MINUS_DST_COLOR            , qpu_w3d_one_minus_dst_color) \
+    X(W3D_SRC_ALPHA                      , qpu_w3d_src_alpha) \
+    X(W3D_ONE_MINUS_SRC_ALPHA            , qpu_w3d_one_minus_src_alpha)
+
+        switch (IDENT_GET_BLEND_SRC(ident)) {
+#define SRC_CASE(name, bcode) case name: COPY_CODE(bcode); break;
+            BLEND_MODES(SRC_CASE)
+#undef SRC_CASE
+            default:
+                COPY_CODE(qpu_w3d_one);
+        }
+
+        switch (IDENT_GET_BLEND_DST(ident)) {
+#define DST_CASE(name, bcode) case name: code = mod_dst_func(code, bcode, sizeof(bcode)/8); break;
+            BLEND_MODES(DST_CASE)
+#undef DST_CASE
+            default:
+                mod_dst_func(code, qpu_w3d_one, sizeof(qpu_w3d_one)/8);
+        }
+
+#undef BLEND_MODES
+
+        while (blend_ninst--) {
+            *code++ = *blend_main++;
+            *code++ = *blend_main++;
+        }
+    }
+
+    return (UBYTE*)code - (UBYTE*)&ctx->shader_temp;
 }
 #undef COPY_CODE
 
@@ -410,14 +517,14 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 {
     LOG_DEBUG("Compiling shader for ident=0x%lx\n", ident);
-    if (ident & IDENT_MASK_INTERP_Z) {
-        LOG_DEBUG("\tInterpolate Z, Mode=%lu\n", IDENT_GET_ZMODE(ident));
+    if (ident & IDENT_MASK_Z_TEST) {
+        LOG_DEBUG("\tZ test, Mode=%lu\n", IDENT_GET_ZMODE(ident));
+    }
+    if (ident & IDENT_MASK_Z_UPDATE) {
+        LOG_DEBUG("\tZ update\n");
     }
     if (ident & IDENT_MASK_INTERP_UV) {
         LOG_DEBUG("\tInterpolate UV, TexEnv=%lu\n", IDENT_GET_TEXENV(ident));
-    }
-    if (ident & IDENT_MASK_INTERP_COLOR) {
-        LOG_DEBUG("\tInterpolate color\n");
     }
     if (ident & IDENT_MASK_INTERP_COLOR) {
         LOG_DEBUG("\tInterpolate color\n");
@@ -443,8 +550,19 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         FreeVec(s);
         return NULL;
     }
+
+#if 0
+    if (ident & IDENT_MASK_BLEND) {
+        for (ULONG i = 0; i < body_size/8; ++i) {
+            uint32_t w0 = ctx->shader_temp[i*2+0];
+            uint32_t w1 = ctx->shader_temp[i*2+1];
+            LOG_DEBUG("\t0x%08lx, 0x%08lx\n", w0, w1);
+        }
+    }
+#endif
+
     ULONG shader_bytes = sizeof(qpu_outer_loop) + body_size;
-    if (ident & IDENT_MASK_INTERP_Z)
+    if (ident & (IDENT_MASK_Z_TEST | IDENT_MASK_Z_UPDATE))
         shader_bytes += sizeof(qpu_load_z);
     if (ident & IDENT_MASK_INTERP_UV)
         shader_bytes += sizeof(qpu_load_tex);
@@ -455,9 +573,25 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     const uint32_t* loop;
 
     // TODO: Use IDENT_GET_ZMODE
-    if (ident & IDENT_MASK_INTERP_Z) {
-        LOG_DEBUG("Creating shader for ZMode = %lu\n", IDENT_GET_ZMODE(ident));
-        SET_LOOP(qpu_loop_z_less);
+    if (ident & (IDENT_MASK_Z_TEST | IDENT_MASK_Z_UPDATE)) {
+        LOG_DEBUG("Creating shader for ZMode = %lu (update? %s)\n", IDENT_GET_ZMODE(ident), ident & IDENT_MASK_Z_UPDATE ? "yes" : "no");
+
+        switch (IDENT_GET_ZMODE(ident)) {
+        default:
+            LOG_DEBUG("%s: TODO ZMode %lu not implemented\n", __func__, IDENT_GET_ZMODE(ident));
+        case W3D_Z_LESS:
+            if (ident & IDENT_MASK_Z_UPDATE)
+                SET_LOOP(qpu_loop_z_less_update);
+            else
+                SET_LOOP(qpu_loop_z_less);
+            break;
+        case W3D_Z_LEQUAL:
+            if (ident & IDENT_MASK_Z_UPDATE)
+                SET_LOOP(qpu_loop_z_lequal_update);
+            else
+                SET_LOOP(qpu_loop_z_lequal);
+            break;
+        }
     } else {
         SET_LOOP(qpu_loop_z_none);
     }
@@ -494,13 +628,17 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
         mode &= ~W3D_TEXMAPPING;
     }
 
-    if (mode & W3D_ZBUFFER) {
-        if (!ctx->zbuffer_mem.busaddr)
-            mode &= ~W3D_ZBUFFER;
-    }
+    if (!ctx->zbuffer_mem.busaddr)
+        mode &= ~(W3D_ZBUFFER | W3D_ZBUFFERUPDATE);
+
+    // "WarpTest" seems to imply that update should be ignored if z-buffer is not enabled
+    if (!(mode & W3D_ZBUFFER) && (mode & W3D_ZBUFFERUPDATE))
+        mode &= ~W3D_ZBUFFERUPDATE;
 
     if (mode & W3D_ZBUFFER)
-        ident |= IDENT_MASK_INTERP_Z | IDENT_SET_ZMODE(ctx->zmode);
+        ident |= IDENT_MASK_Z_TEST | IDENT_SET_ZMODE(ctx->zmode);
+    if (mode & W3D_ZBUFFERUPDATE)
+        ident |= IDENT_MASK_Z_UPDATE;
     if (mode & W3D_GOURAUD)
         ident |= IDENT_MASK_INTERP_COLOR;
     if (mode & W3D_TEXMAPPING)
@@ -511,10 +649,6 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
     int new_job = !ctx->building_job;
     if (!ctx->cur_shader || ctx->cur_shader->ident != ident) {
         new_job = 1;
-
-        if ((mode & W3D_ZBUFFER) && !(mode & W3D_ZBUFFERUPDATE)) {
-            LOG_DEBUG("%s: TODO Z-Buffer without update!\n", __func__);
-        }
 
         ctx->cur_shader = NULL;
         for (VC4D_Shader* s = ctx->shader_hash[ident % VC4D_SHADER_HASH_SIZE]; s; s = s->next) {
@@ -561,4 +695,12 @@ void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
     // Empty job queue
     while (!JOB_QUEUE_EMPTY(ctx))
         update_job_queue(vc4d, ctx);
+
+#if 0
+    static int frame = 0;
+    if (++frame == 10) {
+        vc4_report_perf(vc4d);
+        frame = 0;
+    }
+#endif
 }

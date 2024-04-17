@@ -266,6 +266,15 @@ int vc4_init(VC4D* vc4d)
                         ret = qpu_enable(vc4d, 1);
                         LOG_DEBUG("QPU enable result: %ld\n", ret);
                         LOG_DEBUG("QPU ident: %08lx %08lx %08lx\n", LE32(V3D_IDENT0), LE32(V3D_IDENT1), LE32(V3D_IDENT2));
+                        LOG_DEBUG("L2 Cache state: %08lx\n", LE32(V3D_L2CACTL));
+
+                        // Enable performance counters
+                        for (ULONG i = 0; i <= 29-16; ++i) {
+                            V3D_PCTRS(i) = LE32(16 + i);
+                        }
+                        V3D_PCTRE = V3D_PCTRC = LE32((1U<<(30-16)) - 1); // Clear and enable
+                        V3D_PCTRE = LE32(LE32(V3D_PCTRE) | 0x80000000); // Undocumented: MSB means enable
+
                         ret = 0; // XXX: Ignore enable result for now?
                     } else {
                         LOG_ERROR("Could not open /soc\n");
@@ -392,3 +401,10 @@ int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigne
     return 0;
 }
 
+void vc4_report_perf(VC4D* vc4d)
+{
+    log_debug(vc4d, "Performance counters\n=====================\n");
+    for (int i = 0; i <= 29-16; ++i)
+        log_debug(vc4d, "%ld: %lu\n", i + 16, LE32(V3D_PCTR(i)));
+    V3D_PCTRC = LE32((1U<<(30-16)) - 1); // Clear counters
+}

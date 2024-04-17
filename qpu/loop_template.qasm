@@ -1,16 +1,5 @@
 .include "common.qinc"
 
-.const Z_BUFFER_DISABLED ,     0
-.const W3D_Z_NEVER       ,     1       # discard incoming pixel
-.const W3D_Z_LESS        ,     2       # draw, if value < Z(Z_Buffer)
-.const W3D_Z_GEQUAL      ,     3       # draw, if value >= Z(Z_Buffer)
-.const W3D_Z_LEQUAL      ,     4       # draw, if value <= Z(Z_Buffer)
-.const W3D_Z_GREATER     ,     5       # draw, if value > Z(Z_Buffer)
-.const W3D_Z_NOTEQUAL    ,     6       # draw, if value != Z(Z_Buffer)
-.const W3D_Z_EQUAL       ,     7       # draw, if value == Z(Z_Buffer)
-.const W3D_Z_ALWAYS      ,     8       # always draw
-
-
     # XXX TEMP TEMP TEMP (for W3D_BLEND)
     mov         cEnvColor,-1
 
@@ -88,16 +77,27 @@
     fadd    r3,r0,fvz0      # r3 = calculated z value
     finish_load r2
 
-    .assert Z_MODE == W3D_Z_LESS
     # Z_LESS => draw if value < Z(Z_Buffer)
     # => Need floating point value >= 0 in mask register
-    # TODO: Below gives LE not less, but eh, probably just adjust value a bit?
+    .if Z_MODE == W3D_Z_LESS
+    fsub.setf   r0,r2,r3
+    mov.ifz     r0,-1
+    .elseif Z_MODE == W3D_Z_LEQUAL
     fsub        r0,r2,r3
+    .else
+    assert 0 # TODO
+    .endif
+
+    .if Z_UPDATE != 0
     mov         fZVal,r2
+    .endif
 
     or.setf     fMask,fMask,r0
     brr.alln    -,:next
+
+    .if Z_UPDATE != 0
     mov.ifnn    fZVal,r3 # delay slot 1, Update zbuffer
+    .endif
 
     .endif
 
@@ -109,7 +109,7 @@
     mov.setf    -,fMask
     mov.ifnn    iDestColor,r0
 
-    .if Z_MODE != 0
+    .if Z_UPDATE != 0
 
     # Visualize depth
     #mov         r0,255.0
