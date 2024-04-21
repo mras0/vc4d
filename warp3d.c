@@ -645,7 +645,7 @@ W3D_SetTexEnv(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1
     }
     if (context->state & W3D_GLOBALTEXENV) {
         // TODO: Instead of this probably just save it once and fix in draw_triangle
-        for (texture = (W3D_Texture*)context->restex.mlh_Head ; texture->link.ln_Succ != NULL ; texture = (W3D_Texture*)texture->link.ln_Succ ) {
+        for (texture = (W3D_Texture*)context->restex.mlh_Head; texture->link.ln_Succ != NULL; texture = (W3D_Texture*)texture->link.ln_Succ) {
             ((VC4D_Texture*)texture)->texenv = envparam;
             if (envcolor)
                 ((VC4D_Texture*)texture)->envcolor = *envcolor;
@@ -721,7 +721,7 @@ ULONG W3D_UpdateTexImage(W3D_Context * context __asm("a0"), W3D_Texture * textur
     } else if (format == W3D_R5G6B5) {
         while (n--) {
             UWORD val = *(UWORD*)s;
-            *d++ = TEX_ENDIAN(255 << 24 | Expand5_8(val >> 11) << 16 | Expand6_8(val >> 6) << 8 | Expand5_8(val));
+            *d++ = TEX_ENDIAN(255 << 24 | Expand5_8(val >> 11) << 16 | Expand6_8(val >> 5) << 8 | Expand5_8(val));
             s += 2;
         }
     } else {
@@ -1821,10 +1821,6 @@ W3D_BestModeID(struct TagItem * tags __asm("a0"), VC4D* vc4d __asm("a6"))
         ULONG h = GetCyberIDAttr(CYBRIDATTR_HEIGHT, modeId);
         if (w == width && h == height) {
             LOG_DEBUG("%s %lux%lu exact match found: 0x%lx\n", __func__, width, height, modeId);
-            return modeId;
-        }
-        if ((!width || !height) && w == 1024 && h == 768) {
-            LOG_DEBUG("%s %lux%lu HACK returning: 0x%lx\n", __func__, width, height, modeId);
             return modeId;
         }
         int we = (int)(w - width);

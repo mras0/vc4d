@@ -229,11 +229,21 @@ const APTR FuncTab[] = {
     &W3D_GetScreenmodeList,    // -474
     &W3D_FreeScreenmodeList,   // -480
     &W3D_BestModeID,           // -486
+    //
+    //  V4
+    //
+    &W3D_VertexPointer,        // -492
+    &W3D_TexCoordPointer,      // -498
+    &W3D_ColorPointer,         // -504
+    &W3D_BindTexture,          // -510
+    &W3D_DrawArray,            // -516
+    &W3D_DrawElements,         // -522
+    &W3D_SetFrontFace,         // -528
 
     (APTR) -1
 };
 
-_Static_assert(6 * (sizeof(FuncTab)/sizeof(*FuncTab)-1) == 486, "Invalid table size");
+_Static_assert(6 * (sizeof(FuncTab)/sizeof(*FuncTab)-1) == 528, "Invalid table size");
 
 static const UWORD InitTab[] = {
     INITBYTE(OFFSET(VC4D,lib.lib_Node.ln_Type), NT_LIBRARY),
