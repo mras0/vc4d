@@ -15,10 +15,15 @@
 #define TEX_ENDIAN(x) (x)
 #endif
 
-#if TRACE_LEVEL
+#if TRACE_LEVEL > 2
+#define TODO(...) LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__)
+#define TODOX(...) LOG_DEBUG(__VA_ARGS__)
+#elif TRACE_LEVEL
 #define TODO(...) do { static int warned; if (!warned) { LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__); warned = 1; } } while (0)
+#define TODOX(...) do { static int warned; if (!warned) { LOG_DEBUG(__VA_ARGS__); warned = 1; } } while (0)
 #else
 #define TODO(...)
+#define TODOX(...)
 #endif
 
 #define LOG_VAL(val) LOG_DEBUG("  %-20s = 0x%08lx\n", #val, val)
@@ -339,8 +344,6 @@ W3D_LockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
         LOG_ERROR("%s: Lock failed", __func__);
         return W3D_NOT_SUPPORTED;
     }
-    // XXX HACK HACK! -- trying to work around hangs in Q3
-    UnLockBitMap(context->gfxdriver);
 
     context->HWlocked = W3D_TRUE;
     return W3D_SUCCESS;
@@ -353,10 +356,12 @@ void W3D_UnLockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"
         LOG_ERROR("W3D_UnLockHardware: Called without being locked!\n");
         return;
     }
+    TRACE();
     draw_flush(vc4d, (VC4D_Context*)context);
-    // XXX -- See note in W3D_LockHardware
-    //CGFXBASE;
-    //UnLockBitMap(context->gfxdriver);
+    TRACE();
+    CGFXBASE;
+    UnLockBitMap(context->gfxdriver);
+    TRACE();
     context->HWlocked = W3D_FALSE;
 }
 
@@ -1738,24 +1743,6 @@ ULONG W3D_DrawTriStripV(W3D_Context * context __asm("a0"), W3D_TrianglesV * tria
     const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
 
-#if 0
-    init_vertex(&a, triangles->v[0], perspective);
-    init_vertex(&b, triangles->v[1], perspective);
-    init_vertex(&c, triangles->v[2], perspective);
-
-    draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
-    vertex* v1 = &a;
-    vertex* v2 = &b;
-    vertex* v3 = &c;
-    for (int i = 3; i < triangles->vertexcount; ++i) {
-        VSWAP(v1,v2); // v2=a,v1=b
-        VSWAP(v2,v3); // v2=c,v3=a
-        init_vertex(v3, triangles->v[i], perspective);
-        // TODO: Consider order
-        draw_triangle(vc4d, (VC4D_Context*)context, v1, v2, v3);
-    }
-#else
-
     for (int i = 0; i < triangles->vertexcount - 2; ++i) {
         if (i & 1) {
             init_vertex(&a, triangles->v[i + 1], perspective);
@@ -1768,8 +1755,6 @@ ULONG W3D_DrawTriStripV(W3D_Context * context __asm("a0"), W3D_TrianglesV * tria
         }
         draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     }
-
-#endif
 
     return W3D_SUCCESS;
 }
@@ -1840,76 +1825,290 @@ W3D_BestModeID(struct TagItem * tags __asm("a0"), VC4D* vc4d __asm("a6"))
     return mode;
 }
 
-ULONG
-W3D_VertexPointer(     W3D_Context* context __asm("a0"),
-     void * pointer __asm("a1"),
-     int stride __asm("d0"),
-     ULONG mode __asm("d1"),
-     ULONG flags __asm("d2"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_VertexPointer(W3D_Context* context __asm("a0"), void * pointer __asm("a1"), int stride __asm("d0"), ULONG mode __asm("d1"), ULONG flags __asm("d2"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
-}
-
-ULONG
-W3D_TexCoordPointer(     W3D_Context* context __asm("a0"),
-     void * pointer __asm("a1"),
-     int stride __asm("d0"),
-     int unit __asm("d1"),
-     int off_v __asm("d2"),
-     int off_w __asm("d3"),
-     ULONG flags __asm("d4"),
- VC4D* vc4d __asm("a6"))
-{
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
-}
-
-ULONG
-W3D_ColorPointer(     W3D_Context* context __asm("a0"),
-     void * pointer __asm("a1"),
-     int stride __asm("d0"),
-     ULONG format __asm("d1"),
-     ULONG mode __asm("d2"),
-     ULONG flags __asm("d3"),
- VC4D* vc4d __asm("a6"))
-{
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
-}
-
-ULONG
-W3D_BindTexture(     W3D_Context* context __asm("a0"),
-     ULONG tmu __asm("d0"),
-     W3D_Texture * texture __asm("a1"),
- VC4D* vc4d __asm("a6"))
-{
-    TODO(__func__);
+    TRACE();
+    context->VertexPointer = pointer;
+    context->VPStride = stride;
+    context->VPMode = mode;
     return W3D_SUCCESS;
 }
 
 ULONG
-W3D_DrawArray(     W3D_Context* context __asm("a0"),
-     ULONG primitive __asm("d0"),
-     ULONG base __asm("d1"),
-     ULONG count __asm("d2"),
- VC4D* vc4d __asm("a6"))
+W3D_TexCoordPointer(W3D_Context* context __asm("a0"), void * pointer __asm("a1"), int stride __asm("d0"), int unit __asm("d1"), int off_v __asm("d2"), int off_w __asm("d3"), ULONG flags __asm("d4"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    TRACE();
+    if (unit /*>= W3D_MAX_TMU*/ > 0) {
+        LOG_ERROR("%s: Unsupported tmu: %lu\n", __func__, unit);
+        return W3D_ILLEGALINPUT;
+    }
+    context->TexCoordPointer[unit] = pointer;
+    context->TPStride[unit] = stride;
+    context->TPVOffs[unit] = off_v;
+    context->TPWOffs[unit] = off_w;
+    context->TPFlags[unit] = flags;
+    return W3D_SUCCESS;
 }
 
-ULONG
-W3D_DrawElements(     W3D_Context* context __asm("a0"),
-     ULONG primitive __asm("d0"),
-     ULONG type __asm("d1"),
-     ULONG count __asm("d2"),
-     void * indices __asm("a1"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_ColorPointer(W3D_Context* context __asm("a0"), void * pointer __asm("a1"), int stride __asm("d0"), ULONG format __asm("d1"), ULONG mode __asm("d2"), ULONG flags __asm("d3"), VC4D* vc4d __asm("a6"))
 {
+    TRACE();
     TODO(__func__);
-    return W3D_UNSUPPORTED;
+    return W3D_SUCCESS;
+}
+
+ULONG W3D_BindTexture(W3D_Context* context __asm("a0"), ULONG tmu __asm("d0"), W3D_Texture * texture __asm("a1"), VC4D* vc4d __asm("a6"))
+{
+    TRACE();
+    if (tmu /*>= W3D_MAX_TMU*/ > 0) {
+        LOG_ERROR("%s: Unsupported unit: %lu\n", __func__, tmu);
+        return W3D_ILLEGALINPUT;
+    }
+	context->CurrentTex[tmu] = texture;
+    TODO(__func__);
+    return W3D_SUCCESS;
+}
+
+#if TRACE_LEVEL > 0
+static const char* primitive_type_names[] = {
+"W3D_PRIMITIVE_TRIANGLES",
+"W3D_PRIMITIVE_TRIFAN",
+"W3D_PRIMITIVE_TRISTRIP",
+"W3D_PRIMITIVE_POINTS",
+"W3D_PRIMITIVE_LINES",
+"W3D_PRIMITIVE_LINELOOP",
+"W3D_PRIMITIVE_LINESTRIP",
+};
+#endif
+
+// XXX: Note that MiniGL modifies the pointer in W3D_Context directly!!! Naughty!!!
+static void init_vertex_arr(VC4D* vc4d, W3D_Context* context, vertex* v, ULONG i)
+{
+    // TODO: Optimize
+    W3D_Vertex w = { 0, };
+    w.color.r =
+    w.color.g =
+    w.color.b =
+    w.color.a = 1.0f;
+
+    if (context->VertexPointer) {
+        const void* vp = (void*)((ULONG)context->VertexPointer + i * context->VPStride);
+        switch (context->VPMode) {
+            case W3D_VERTEX_F_F_F:
+                {
+                    const float* v = vp;
+                    w.x = *v++;
+                    w.y = *v++;
+                    w.z = *v;
+                    break;
+                }
+            case W3D_VERTEX_F_F_D:
+                {
+                    const float* v = vp;
+                    w.x = *v++;
+                    w.y = *v++;
+                    w.z = *(double*)v;
+                    break;
+                }
+            case W3D_VERTEX_D_D_D:
+                {
+                    const double* v = vp;
+                    w.x = *v++;
+                    w.y = *v++;
+                    w.z = *v;
+                    break;
+                }
+            default:
+                LOG_DEBUG("%s: TODO support VPMode %lu\n", __func__, context->VPMode);
+        }
+        w.w = 1.0f / w.z;
+    }
+
+    if (context->TexCoordPointer[0] && context->CurrentTex[0]) {
+        ULONG tp = (ULONG)context->TexCoordPointer[0] + i * context->TPStride[0];
+        w.u = *(float*)tp;
+        w.v = *(float*)(tp + context->TPVOffs[0]);
+        w.w = *(float*)(tp + context->TPWOffs[0]);
+        if (context->TPFlags[0] == W3D_TEXCOORD_NORMALIZED) {
+            w.u *= context->CurrentTex[0]->texwidth;
+            w.v *= context->CurrentTex[0]->texheight;
+        }
+    }
+
+    if (context->ColorPointer) {
+        ULONG cp = (ULONG)context->ColorPointer + i * context->CPStride;
+        float c[4] = { 1, 1, 1, 1 };
+        const ULONG m = context->CPMode;
+
+        if (m & W3D_COLOR_FLOAT) {
+            const float* f = (const float*)cp;
+            c[0] = f[0];
+            c[1] = f[1];
+            c[2] = f[2];
+            c[3] = f[3];
+        } else if (m & W3D_COLOR_UBYTE) {
+            const uint8_t* u = (const uint8_t*)cp;
+            c[0] = u[0] * (1.0f/255.0f);
+            c[1] = u[1] * (1.0f/255.0f);
+            c[2] = u[2] * (1.0f/255.0f);
+            c[3] = u[3] * (1.0f/255.0f);
+        }
+
+        if (m & W3D_CMODE_RGBA) {
+            w.color.r = c[0];
+            w.color.g = c[1];
+            w.color.b = c[2];
+            w.color.a = c[3];
+        } else if (m & W3D_CMODE_ARGB) {
+            w.color.a = c[0];
+            w.color.r = c[1];
+            w.color.g = c[2];
+            w.color.b = c[3];
+        } else {
+            LOG_DEBUG("%s: TODO: CPMode 0x%08lx\n", __func__, m);
+        }
+
+//#define W3D_CMODE_RGB       0x01
+//#define W3D_CMODE_BGR       0x02
+//#define W3D_CMODE_RGBA      0x04
+//#define W3D_CMODE_ARGB      0x08
+//#define W3D_CMODE_BGRA      0x10
+    }
+
+    init_vertex(v, &w, (context->state & W3D_PERSPECTIVE) != 0);
+}
+
+#define INIT_VERTEX_ARR(v, i) init_vertex_arr(vc4d, context, v, i)
+
+ULONG W3D_DrawArray(W3D_Context* context __asm("a0"), ULONG primitive __asm("d0"), ULONG base __asm("d1"), ULONG count __asm("d2"), VC4D* vc4d __asm("a6"))
+{
+    if (!count)
+        return W3D_SUCCESS;
+
+    if (primitive > W3D_PRIMITIVE_LINESTRIP) {
+        LOG_ERROR("%s: Invalid primitive %lu\n", __func__, primitive);
+        return W3D_ILLEGALINPUT;
+    }
+    if (count< 3) {
+        LOG_ERROR("%s: Invalid number of vertices %ld\n", __func__, count);
+        return W3D_ILLEGALINPUT;
+    }
+
+    if (!context->HWlocked) {
+        LOG_ERROR("%s: Hardware not locked!\n", __func__);
+        return W3D_UNSUPPORTED;
+    }
+
+    TRACE();
+    draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)context->CurrentTex[0]);
+
+    vertex a, b, c;
+    if (primitive == W3D_PRIMITIVE_TRIFAN) {
+        TRACE();
+        INIT_VERTEX_ARR(&a, base + 0);
+        INIT_VERTEX_ARR(&b, base + 1);
+        INIT_VERTEX_ARR(&c, base + 2);
+
+        draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+        vertex* v2 = &b;
+        vertex* v3 = &c;
+        for (ULONG i = 3; i < count; ++i) {
+            VSWAP(v2, v3);
+
+            INIT_VERTEX_ARR(v3, base + i);
+
+            draw_triangle(vc4d, (VC4D_Context*)context, &a, v2, v3);
+        }
+    } else if (primitive == W3D_PRIMITIVE_TRISTRIP) {
+        TRACE();
+        for (ULONG i = 0; i < count - 2; ++i) {
+            // XXX much trace here...
+            TRACE();
+            if (i & 1) {
+                INIT_VERTEX_ARR(&a, base + i + 1);
+                INIT_VERTEX_ARR(&b, base + i + 0);
+                INIT_VERTEX_ARR(&c, base + i + 2);
+            } else {
+                INIT_VERTEX_ARR(&a, base + i + 0);
+                INIT_VERTEX_ARR(&b, base + i + 1);
+                INIT_VERTEX_ARR(&c, base + i + 2);
+            }
+            TRACE();
+            draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+            TRACE();
+        }
+    } else {
+        LOG_DEBUG("TODO: %s %s count=%lu\n", __func__, primitive_type_names[primitive], count);
+    }
+    TRACE();
+    return W3D_SUCCESS;
+}
+
+#define INIT_VERTEX_ARR_E(v, i) INIT_VERTEX_ARR(v, type == W3D_INDEX_UBYTE ? ((UBYTE*)indices)[i] : type == W3D_INDEX_UWORD ? ((UWORD*)indices)[i] : ((ULONG*)indices)[i])
+
+ULONG W3D_DrawElements(W3D_Context* context __asm("a0"), ULONG primitive __asm("d0"), ULONG type __asm("d1"), ULONG count __asm("d2"), void * indices __asm("a1"), VC4D* vc4d __asm("a6"))
+{
+    if (!count)
+        return W3D_SUCCESS;
+
+    if (primitive > W3D_PRIMITIVE_LINESTRIP) {
+        LOG_ERROR("%s: Invalid primitive %lu\n", __func__, primitive);
+        return W3D_ILLEGALINPUT;
+    }
+
+    if (type > W3D_INDEX_ULONG) {
+        LOG_ERROR("%s: Invalid index type %lu\n", __func__, type);
+    }
+
+    if (count< 3) {
+        LOG_ERROR("%s: Invalid number of vertices %ld\n", __func__, count);
+        return W3D_ILLEGALINPUT;
+    }
+
+    if (!context->HWlocked) {
+        LOG_ERROR("%s: Hardware not locked!\n", __func__);
+        return W3D_UNSUPPORTED;
+    }
+
+    TRACE();
+    draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)context->CurrentTex[0]);
+
+    vertex a, b, c;
+    if (primitive == W3D_PRIMITIVE_TRIFAN) {
+        TRACE();
+        INIT_VERTEX_ARR_E(&a, 0);
+        INIT_VERTEX_ARR_E(&b, 1);
+        INIT_VERTEX_ARR_E(&c, 2);
+
+        draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+        vertex* v2 = &b;
+        vertex* v3 = &c;
+        for (ULONG i = 3; i < count; ++i) {
+            VSWAP(v2, v3);
+
+            INIT_VERTEX_ARR_E(v3, i);
+
+            draw_triangle(vc4d, (VC4D_Context*)context, &a, v2, v3);
+        }
+    } else if (primitive == W3D_PRIMITIVE_TRISTRIP) {
+        TRACE();
+        for (ULONG i = 0; i < count - 2; ++i) {
+            if (i & 1) {
+                INIT_VERTEX_ARR_E(&a, i + 1);
+                INIT_VERTEX_ARR_E(&b, i + 0);
+                INIT_VERTEX_ARR_E(&c, i + 2);
+            } else {
+                INIT_VERTEX_ARR_E(&a, i + 0);
+                INIT_VERTEX_ARR_E(&b, i + 1);
+                INIT_VERTEX_ARR_E(&c, i + 2);
+            }
+            draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+        }
+    } else {
+        LOG_DEBUG("TODO: %s %s count=%lu\n", __func__, primitive_type_names[primitive], count);
+    }
+    TRACE();
+    return W3D_SUCCESS;
 }
 
 void

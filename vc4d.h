@@ -11,7 +11,7 @@
 #include "vc4.h"
 #endif
 
-#define VC4D_VERSION    3 // TODO: v4
+#define VC4D_VERSION    4
 #define VC4D_REVISION   0
 
 #define VC4D_STR(x) VC4D_XSTR(x)
