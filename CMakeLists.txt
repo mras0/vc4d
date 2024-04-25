@@ -13,7 +13,7 @@ endif()
 
 set(QASM_HEADERS "")
 
-add_definitions(-DTRACE_LEVEL=0)
+add_definitions(-DTRACE_LEVEL=2)
 
 macro(qasm name)
     set(dst ${CMAKE_CURRENT_BINARY_DIR}/${name}.h)

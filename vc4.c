@@ -374,6 +374,11 @@ int vc4_wait_qpu(struct VC4D* vc4d)
     return 0;
 }
 
+ULONG vc4_V3D_SRQCS(void)
+{
+    return LE32(V3D_SRQCS);
+}
+
 int vc4_run_qpu(struct VC4D* vc4d, uint32_t num_qpus, unsigned code_bus, unsigned uniform_bus)
 {
     (void)vc4d;

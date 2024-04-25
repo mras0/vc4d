@@ -903,13 +903,26 @@ ULONG W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triang
     return W3D_SUCCESS;
 }
 
-ULONG
-W3D_SetAlphaMode(     W3D_Context * context __asm("a0"),
-     ULONG mode __asm("d1"),
-     W3D_Float * refval __asm("a1"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_SetAlphaMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d1"), W3D_Float * refval __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    if (mode < W3D_A_NEVER || mode > W3D_A_ALWAYS) {
+        LOG_ERROR("%s: Invalid mode %lu\n", __func__, mode);
+        return W3D_ILLEGALINPUT;
+    }
+
+#if TRACE_LEVEL > 1
+    const char* const alpha_mode_strings[8] = {
+        "W3D_A_NEVER",      /* discard incoming pixel */
+        "W3D_A_LESS",       /* draw, if value < refvalue */
+        "W3D_A_GEQUAL",     /* draw, if value >= refvalue */
+        "W3D_A_LEQUAL",     /* draw, if value <= refvalue */
+        "W3D_A_GREATER",    /* draw, if value > refvalue */
+        "W3D_A_NOTEQUAL",   /* draw, if value != refvalue */
+        "W3D_A_EQUAL",      /* draw, if value == refvalue */
+        "W3D_A_ALWAYS",     /* always draw */
+    };
+    TODOX("%s: mode = %s\n", __func__, alpha_mode_strings[mode - 1]);
+#endif
     return W3D_SUCCESS;
 }
 
@@ -1696,15 +1709,18 @@ ULONG W3D_DrawTriFanV(W3D_Context * context __asm("a0"), W3D_TrianglesV * triang
     }
 
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
+    TRACE();
 
 
     const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
     init_vertex(&a, triangles->v[0], perspective);
+    TRACE();
     init_vertex(&b, triangles->v[1], perspective);
     init_vertex(&c, triangles->v[2], perspective);
 
     draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+    TRACE();
     vertex* v2 = &b;
     vertex* v3 = &c;
     for (int i = 3; i < triangles->vertexcount; ++i) {

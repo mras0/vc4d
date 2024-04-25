@@ -1,6 +1,8 @@
 #include "draw.h"
 #include <proto/exec.h>
 
+//#define QPU_DEBUG
+
 // Shader identification:
 // Interpolated values: Z(?), UV, RGBA (2-3 bits)
 // Z-compare: 8 (3 bits)
@@ -50,6 +52,11 @@ static inline int imax(int a, int b)
     return a > b ? a : b;
 }
 
+static inline int iclip(int val, int vmin, int vmax)
+{
+    return imin(imax(val, vmin), vmax);
+}
+
 static inline float fmin3(float a, float b, float c)
 {
     return FMIN(a, FMIN(b, c));
@@ -87,7 +94,9 @@ static inline uint32_t pack_color(const W3D_Color* c)
 static void update_job_queue(VC4D* vc4d, VC4D_Context* ctx)
 {
     if (ctx->running_job && !vc4_qpu_active(vc4d)) {
-        //LOG_DEBUG("%s: job %lu finished\n", __func__, ctx->last_done_job);
+#ifdef QPU_DEBUG
+        LOG_DEBUG("%s: job %lu finished\n", __func__, ctx->last_done_job);
+#endif
         ctx->running_job = FALSE;
         ++ctx->last_done_job;
     }
@@ -96,22 +105,42 @@ static void update_job_queue(VC4D* vc4d, VC4D_Context* ctx)
         return;
 
     if (!ctx->running_job) {
-        //LOG_DEBUG("%s: running job %lu\n", __func__, ctx->last_done_job);
+#ifdef QPU_DEBUG
+        LOG_DEBUG("%s: running job %lu\n", __func__, ctx->last_done_job);
+#endif
         VC4D_QPU_Job* job = &ctx->jobs[ctx->last_done_job % QPU_NUM_JOBS];
         vc4_run_qpu(vc4d, VC4_MAX_QPUS, job->shader_bus, ctx->uniform_mem.busaddr + (ctx->last_done_job % QPU_NUM_JOBS) * QPU_UNIFORMS_PER_JOB * 4);
         ctx->running_job = TRUE;
     }
 }
 
-static void init_job(VC4D* vc4d, VC4D_Context* ctx)
+static void init_job(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 {
-    while (JOB_QUEUE_FULL(ctx)) {
-        //LOG_DEBUG("%s: job queue is full\n", __func__);
-        update_job_queue(vc4d, ctx);
+    (void)ident;
+    if (JOB_QUEUE_FULL(ctx)) {
+#ifdef QPU_DEBUG
+        LOG_DEBUG("%s: job queue is full last_done_job=%lu cur_job=%lu V3D_SRQPC=0x%0lx\n", __func__, ctx->last_done_job, ctx->cur_job, vc4_V3D_SRQCS());
+#endif
+        while (JOB_QUEUE_FULL(ctx)) {
+#ifdef QPU_DEBUG
+            static ULONG cnt = 0;
+            if (++cnt == 1000000) {
+                LOG_DEBUG("%s: job queue is full last_done_job=%lu cur_job=%lu V3D_SRQPC=0x%0lx\n", __func__, ctx->last_done_job, ctx->cur_job, vc4_V3D_SRQCS());
+                cnt = 0;
+            }
+#endif
+            update_job_queue(vc4d, ctx);
+        }
+#ifdef QPU_DEBUG
+        LOG_DEBUG("%s: job queue has roomlast_done_job=%lu cur_job=%lu\n", __func__, ctx->last_done_job, ctx->cur_job);
+#endif
     }
 
-    //LOG_DEBUG("%s: job %lu initialized\n", __func__, ctx->cur_job);
+
     VC4D_QPU_Job* job = &ctx->jobs[ctx->cur_job % QPU_NUM_JOBS];
+#ifdef QPU_DEBUG
+    LOG_DEBUG("%s: job %lu initialized (ident=0x%lx)\n", __func__, ctx->cur_job, ident);
+#endif
     uint32_t* unif = ((uint32_t*)ctx->uniform_mem.hostptr) + (ctx->cur_job % QPU_NUM_JOBS) * QPU_UNIFORMS_PER_JOB;
     job->num_uniforms = 0;
     job->shader_bus = ctx->cur_shader->code_mem.busaddr;
@@ -131,7 +160,9 @@ static void end_job(VC4D* vc4d, VC4D_Context* ctx)
     uint32_t* unif = ((uint32_t*)ctx->uniform_mem.hostptr) + (ctx->cur_job % QPU_NUM_JOBS) * QPU_UNIFORMS_PER_JOB;
     if (!*unif || !ctx->cur_shader)
         return;
-    //LOG_DEBUG("%s: job %lu queued %lu triangles\n", __func__, ctx->cur_job, *unif);
+#ifdef QPU_DEBUG
+    LOG_DEBUG("%s: job %lu queued %lu triangles\n", __func__, ctx->cur_job, *unif);
+#endif
     *unif = LE32(*unif);
     VC4D_QPU_Job* job = &ctx->jobs[ctx->cur_job % QPU_NUM_JOBS];
     SYSBASE;
@@ -154,11 +185,13 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
         area2 = -area2;
     }
 
+    const ULONG ident = ctx->cur_shader->ident;
+
     // Could use actual number of uniforms for check...
     if (ctx->jobs[ctx->cur_job % QPU_NUM_JOBS].num_uniforms + 64 >= QPU_UNIFORMS_PER_JOB) {
         //LOG_DEBUG("%s: Max job size reached\n", __func__);
         end_job(vc4d, ctx);
-        init_job(vc4d, ctx);
+        init_job(vc4d, ctx, ident);
     } else {
         update_job_queue(vc4d, ctx);
     }
@@ -170,13 +203,17 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     uint32_t idx = job->num_uniforms;
 
 
-    const ULONG ident = ctx->cur_shader->ident;
-
     W3D_Context* wctx = &ctx->w3d;
-    int minX = imax(wctx->scissor.left,                       ftoi(fmin3(v0->x, v1->x, v2->x)));
-    int maxX = imin(wctx->scissor.left + wctx->scissor.width, ftoi(fmax3(v0->x, v1->x, v2->x)));
-    int minY = imax(wctx->scissor.top,                        ftoi(fmin3(v0->y, v1->y, v2->y)));
-    int maxY = imin(wctx->scissor.top + wctx->scissor.height, ftoi(fmax3(v0->y, v1->y, v2->y)));
+
+    const int xMin = wctx->scissor.left;
+    const int xMax = wctx->scissor.left + wctx->scissor.width;
+    const int yMin = wctx->scissor.top;
+    const int yMax = wctx->scissor.top + wctx->scissor.height;
+
+    int minX = iclip(ftoi(fmin3(v0->x, v1->x, v2->x)), xMin, xMax);
+    int maxX = iclip(ftoi(fmax3(v0->x, v1->x, v2->x)), xMin, xMax);
+    int minY = iclip(ftoi(fmin3(v0->y, v1->y, v2->y)), yMin, yMax);
+    int maxY = iclip(ftoi(fmax3(v0->y, v1->y, v2->y)), yMin, yMax);
 
     if (minX == maxX || minY == maxY)
         return;
@@ -201,6 +238,15 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
 
     unif[idx++] = LE32((maxX - minX) / XSTEP);
     unif[idx++] = LE32((maxY - minY + (VC4_MAX_QPUS - 1)) / VC4_MAX_QPUS);
+#ifdef QPU_DEBUG
+    if (maxY <= minY || LE32(unif[idx-1]) > 100) {
+        LOG_ERROR("minY = %ld maxY = %ld mod = %d\n", minY, maxY, mod);
+        LOG_ERROR("Orig: %ld %ld\n", ftoi(fmin3(v0->y, v1->y, v2->y)), ftoi(fmax3(v0->y, v1->y, v2->y)));
+        LOG_ERROR("scissor top = %ld height = %ld\n", wctx->scissor.top, wctx->scissor.height);
+    }
+    LOG_DEBUG("xstep=%lu ystep=%lu\n", LE32(unif[idx-2]), LE32(unif[idx-1]));
+#endif
+
     unif[idx++] = LE32(PHYS_TO_BUS((ULONG)wctx->vmembase + 4*minX + wctx->bprow*(minY + wctx->yoffset)));
     unif[idx++] = LE32(wctx->bprow);
     unif[idx++] = lef32(A01);
@@ -683,7 +729,7 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
 
     if (new_job) {
         end_job(vc4d, ctx);
-        init_job(vc4d, ctx);
+        init_job(vc4d, ctx, ident);
     }
 }
 

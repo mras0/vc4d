@@ -38,4 +38,6 @@ int vc4_wait_qpu(struct VC4D* vc4d);
 int vc4_qpu_active(struct VC4D* vc4d);
 void vc4_report_perf(struct VC4D* vc4d);
 
+uint32_t vc4_V3D_SRQCS(void);
+
 #endif
