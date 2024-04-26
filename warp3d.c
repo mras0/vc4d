@@ -19,8 +19,8 @@
 #define TODO(...) LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__)
 #define TODOX(...) LOG_DEBUG(__VA_ARGS__)
 #elif TRACE_LEVEL
-#define TODO(...) do { static int warned; if (!warned) { LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__); warned = 1; } } while (0)
-#define TODOX(...) do { static int warned; if (!warned) { LOG_DEBUG(__VA_ARGS__); warned = 1; } } while (0)
+#define TODO(...) do { static int warned; if (!warned) { LOG_DEBUG("TODO: Implement %s\n", __VA_ARGS__); /*warned = 1*/; } } while (0)
+#define TODOX(...) do { static int warned; if (!warned) { LOG_DEBUG(__VA_ARGS__); /* warned = 1 */; } } while (0)
 #else
 #define TODO(...)
 #define TODOX(...)
@@ -351,6 +351,11 @@ W3D_LockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
         return W3D_NOT_SUPPORTED;
     }
 
+    // XXX: Major hack. Unlock straight away, othewise hhexen-gl hangs...
+
+    UnLockBitMap(context->gfxdriver);
+    TRACE();
+
     context->HWlocked = W3D_TRUE;
     return W3D_SUCCESS;
 }
@@ -364,9 +369,6 @@ void W3D_UnLockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"
     }
     TRACE();
     draw_flush(vc4d, (VC4D_Context*)context);
-    TRACE();
-    CGFXBASE;
-    UnLockBitMap(context->gfxdriver);
     TRACE();
     context->HWlocked = W3D_FALSE;
 }
@@ -741,7 +743,7 @@ ULONG W3D_UpdateTexImage(W3D_Context * context __asm("a0"), W3D_Texture * textur
 
 #ifdef PISTORM32
     SYSBASE;
-    CacheClearU();
+    CacheClearE(((VC4D_Texture*)texture)->texture_mem.hostptr, texture->texwidth * texture->texheight * 4, CACRF_ClearD);
 #endif
 
     return W3D_SUCCESS;
@@ -927,7 +929,8 @@ ULONG W3D_SetAlphaMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d1")
         "W3D_A_EQUAL",      /* draw, if value == refvalue */
         "W3D_A_ALWAYS",     /* always draw */
     };
-    TODOX("%s: mode = %s\n", __func__, alpha_mode_strings[mode - 1]);
+    if (mode != W3D_A_GREATER)
+        TODOX("%s: mode = %s\n", __func__, alpha_mode_strings[mode - 1]);
 #endif
 
     ((VC4D_Context*)context)->alpha_test = mode;
@@ -1010,15 +1013,11 @@ W3D_SetFogParams(W3D_Context * context __asm("a0"), W3D_Fog * fogparams __asm("a
     return W3D_SUCCESS;
 }
 
-ULONG
-W3D_SetColorMask(     W3D_Context * context __asm("a0"),
-     W3D_Bool red __asm("d0"),
-     W3D_Bool green __asm("d1"),
-     W3D_Bool blue __asm("d2"),
-     W3D_Bool alpha __asm("d3"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_SetColorMask(W3D_Context * context __asm("a0"), W3D_Bool red __asm("d0"), W3D_Bool green __asm("d1"), W3D_Bool blue __asm("d2"), W3D_Bool alpha __asm("d3"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    if (!red || !green || !blue || !alpha) {
+        TODOX("%s: rgba = %ld %ld %ld %ld\n", __func__, red, green, blue, alpha);
+    }
     return W3D_SUCCESS;
 }
 
@@ -1079,7 +1078,7 @@ W3D_ClearZBuffer(W3D_Context * context __asm("a0"), W3D_Double * clearvalue __as
     for (ULONG i = vctx->width * vctx->height; i--; )
         *buffer++ = val;
     SYSBASE;
-    CacheClearU();
+    CacheClearE(vctx->zbuffer_mem.hostptr, vctx->width * vctx->height * 4, CACRF_ClearD);
     TRACE();
 #endif
     return W3D_SUCCESS;
@@ -1376,7 +1375,7 @@ W3D_UpdateTexSubImage(     W3D_Context * context __asm("a0"),
      ULONG srcbpr __asm("d0"),
  VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    TODOX("%s: lev=%ld\n", __func__, lev);
     return W3D_UNSUPPORTED;
 }
 
@@ -1692,8 +1691,7 @@ W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), 
     }
 
     SYSBASE;
-    CacheClearU();
-
+    CacheClearE(screen + clip_y0 * context->bprow, (clip_y1 - clip_y0) * context->bprow, CACRF_ClearD);
 
     return W3D_SUCCESS;
 }
@@ -1901,7 +1899,7 @@ ULONG W3D_BindTexture(W3D_Context* context __asm("a0"), ULONG tmu __asm("d0"), W
     return W3D_SUCCESS;
 }
 
-#if TRACE_LEVEL > 0
+#if TRACE_LEVEL > 1
 static const char* primitive_type_names[] = {
 "W3D_PRIMITIVE_TRIANGLES",
 "W3D_PRIMITIVE_TRIFAN",
