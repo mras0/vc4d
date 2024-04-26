@@ -13,7 +13,7 @@ endif()
 
 set(QASM_HEADERS "")
 
-add_definitions(-DTRACE_LEVEL=2)
+add_definitions(-DTRACE_LEVEL=4)
 
 macro(qasm name)
     set(dst ${CMAKE_CURRENT_BINARY_DIR}/${name}.h)
@@ -66,6 +66,11 @@ else()
     qasm(w3d_one_minus_dst_color)
     qasm(w3d_src_alpha)
     qasm(w3d_one_minus_src_alpha)
+
+    # AlphaTest
+    qasm(load_alpha_ref)
+
+    qasm(w3d_a_greater)
 
     set(DRAW_FILES
         vc4.c

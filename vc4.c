@@ -315,7 +315,9 @@ void vc4_mem_free(VC4D* vc4d, vc4_mem* m)
 {
 	if (m->handle) {
         BytesAllocated -= m->size;
+#if TRACE_LEVEL > 2
         LOG_DEBUG("Freeing %lu bytes, busaddr = %lx phys = %lx\n", m->size, m->busaddr, BUS_TO_PHYS(m->busaddr));
+#endif
 		if (m->busaddr)
 			mem_unlock(vc4d, m->handle);
 		mem_free(vc4d, m->handle);
@@ -345,7 +347,9 @@ int vc4_mem_alloc(VC4D* vc4d, vc4_mem* m, unsigned size)
 		vc4_mem_free(vc4d, m);
 		return -3;
 	}
+#if TRACE_LEVEL > 2
 	LOG_DEBUG("Allocated %lu bytes, busaddr = %lx phys = %lx\n", size, m->busaddr, BUS_TO_PHYS(m->busaddr));
+#endif
     BytesAllocated += m->size;
 	return 0;
 }

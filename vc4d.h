@@ -73,6 +73,9 @@ typedef struct VC4D_Context {
     ULONG blend_srcmode;
     ULONG blend_dstmode;
 
+    ULONG alpha_test;
+    float alpha_ref;
+
 #ifdef PISTORM32
     vc4_mem uniform_mem;
 

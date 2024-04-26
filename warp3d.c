@@ -120,6 +120,7 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
     ULONG fast      = GetTagData(W3D_CC_FAST, W3D_FALSE, CCTags);              /* Allow Warp3D to modify passed Triangle/Lines/Points */
     ULONG modeid    = GetTagData(W3D_CC_MODEID, INVALID_ID, CCTags);           /* Specify modeID to use */
 
+#if TRACE_LEVEL > 2
     LOG_VAL(bm        );
     LOG_VAL(yofs      );
     LOG_VAL(driver    );
@@ -128,7 +129,9 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
     LOG_VAL(globaltex );
     LOG_VAL(dheight   );
     LOG_VAL(fast      );
-    LOG_VAL(modeid    ); (void)modeid;
+    LOG_VAL(modeid    );
+#endif
+    (void)modeid;
 
     if (!bm || driver == W3D_DRIVER_CPU || w3dbm || !CheckBitMap(vc4d, bm)) {
         *error = W3D_UNSUPPORTED;
@@ -188,6 +191,9 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
 
     vctx->blend_srcmode = W3D_SRC_ALPHA;
     vctx->blend_dstmode = W3D_ONE_MINUS_SRC_ALPHA;
+
+    vctx->alpha_test = W3D_A_ALWAYS;
+    vctx->alpha_ref = 0.0f;
 
 #ifdef PISTORM32
     int res = vc4_mem_alloc(vc4d, &vctx->uniform_mem, QPU_UNIFORMS_PER_JOB * QPU_NUM_JOBS * 4);
@@ -260,7 +266,7 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
 
 #if TRACE_LEVEL > 1
 
-#if TRACE_LEVEL > 2
+#if TRACE_LEVEL <= 2
     // Supported here just means we won't complain about it changes to it..
     const ULONG supported =
 //        W3D_AUTOTEXMANAGEMENT |
@@ -281,10 +287,10 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
         W3D_ANTI_LINE |
         W3D_ANTI_POLYGON |
         W3D_ANTI_FULLSCREEN |
-        W3D_DITHERING //|
+        W3D_DITHERING |
         /*W3D_LOGICOP |*/
         /*W3D_STENCILBUFFER |*/
-        /*W3D_ALPHATEST |*/
+        W3D_ALPHATEST //|
         /*W3D_SPECULAR |*/
         /*W3D_TEXMAPPING3D |*/
         /*W3D_SCISSOR |*/
@@ -923,6 +929,15 @@ ULONG W3D_SetAlphaMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d1")
     };
     TODOX("%s: mode = %s\n", __func__, alpha_mode_strings[mode - 1]);
 #endif
+
+    ((VC4D_Context*)context)->alpha_test = mode;
+    float ref = *refval;
+    if (ref < 0)
+        ref = 0;
+    else if (ref > 1)
+        ref = 1;
+    ((VC4D_Context*)context)->alpha_ref = ref;
+
     return W3D_SUCCESS;
 }
 
@@ -1065,6 +1080,7 @@ W3D_ClearZBuffer(W3D_Context * context __asm("a0"), W3D_Double * clearvalue __as
         *buffer++ = val;
     SYSBASE;
     CacheClearU();
+    TRACE();
 #endif
     return W3D_SUCCESS;
 }

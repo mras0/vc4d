@@ -140,6 +140,8 @@ _breg-1
 .set fMask,a_alloc()
 .set iDestColor,a_alloc()
 
+.set fAlphaRef,a_alloc()
+
 .set aTemp0,a_alloc()
 
 ######################################

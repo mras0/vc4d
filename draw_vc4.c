@@ -1,20 +1,16 @@
 #include "draw.h"
 #include <proto/exec.h>
 
-//#define QPU_DEBUG
-
-// Shader identification:
-// Interpolated values: Z(?), UV, RGBA (2-3 bits)
-// Z-compare: 8 (3 bits)
-// Tex env: 4 (2 bits)
-// Tex repeat/clamp: 2*2 (2 bits)
-// Blend modes: 16*16 (4 bits each -> 8 bits) though to all are valid
+#if TRACE_LEVEL > 3
+#define QPU_DEBUG
+#endif
 
 #define IDENT_MASK_Z_TEST           (1 << 0)
 #define IDENT_MASK_Z_UPDATE         (1 << 1)
 #define IDENT_MASK_INTERP_UV        (1 << 2)
 #define IDENT_MASK_INTERP_COLOR     (1 << 3)
 #define IDENT_MASK_BLEND            (1 << 4)
+#define IDENT_MASK_ALPHA_TEST       (1 << 5)
 
 #define IDENT_ZMODE_SHIFT           13 // 3 bits mapped from 1..8 to 0..7
 #define IDENT_GET_ZMODE(ident)      ((((ident) >> IDENT_ZMODE_SHIFT) & 7) + 1)
@@ -31,6 +27,10 @@
 #define IDENT_BLEND_DST_SHIFT       22
 #define IDENT_GET_BLEND_DST(ident)  ((((ident) >> IDENT_BLEND_DST_SHIFT) & 15) + 1)
 #define IDENT_SET_BLEND_DST(mode)   (((mode) - 1) << IDENT_BLEND_DST_SHIFT)
+
+#define IDENT_ALPHA_TEST_SHIFT       26
+#define IDENT_GET_ALPHA_TEST(ident)  ((((ident) >> IDENT_ALPHA_TEST_SHIFT) & 7) + 1)
+#define IDENT_SET_ALPHA_TEST(mode)   (((mode) - 1) << IDENT_ALPHA_TEST_SHIFT)
 
 #define XSTEP 16
 
@@ -258,6 +258,7 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     unif[idx++] = lef32(w0_row);
     unif[idx++] = lef32(w1_row);
     unif[idx++] = lef32(w2_row);
+
 #define VARYING(n) \
     unif[idx++] = lef32(v0->n); \
     unif[idx++] = lef32((v1->n - v0->n) * invarea2); \
@@ -281,9 +282,14 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
         VARYING(a);
     }
 
+#undef VARYING
+
+    if (ident & IDENT_MASK_ALPHA_TEST)
+        unif[idx++] = lef32(/*ctx->alpha_ref*/0.0f);
+
     // TODO:
     // unif[idx++] = LE32(pack_color(&ctx->cur_tex->envcolor));
-#undef VARYING
+
     job->num_uniforms = idx;
     ++*unif; // Increment number of triangles
 }
@@ -330,6 +336,9 @@ static const uint32_t qpu_load_tex[] = {
 };
 static const uint32_t qpu_load_color[] = {
 #include "load_color.h"
+};
+static const uint32_t qpu_load_alpha_ref[] = {
+#include "load_alpha_ref.h"
 };
 
 // Interpolation / texture lookup
@@ -384,6 +393,11 @@ static const uint32_t qpu_w3d_one_minus_src_alpha[] = {
 #include "w3d_one_minus_src_alpha.h"
 };
 
+// Alpha testing
+static const uint32_t qpu_w3d_a_greater[] = {
+#include "w3d_a_greater.h"
+};
+
 #define BLEND_MAX_INST 20 // XXX
 
 #define IS_BRANCH(x) ((x) >> 28 == 15)
@@ -412,6 +426,8 @@ static uint32_t* merge_code(uint32_t* dest, const uint32_t* loop, uint32_t loop_
         MERGE_COPY(qpu_load_tex);
     if (ident & IDENT_MASK_INTERP_COLOR)
         MERGE_COPY(qpu_load_color);
+    if (ident & IDENT_MASK_ALPHA_TEST)
+        MERGE_COPY(qpu_load_alpha_ref);
 
     uint32_t adjust = (body_icnt - 1) * 8; // -1 for marker
     while (loop_icnt--) {
@@ -554,6 +570,11 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         }
     }
 
+    if (ident & IDENT_MASK_ALPHA_TEST) {
+        // XXX assume W3D_A_GREATER
+        COPY_CODE(qpu_w3d_a_greater);
+    }
+
     return (UBYTE*)code - (UBYTE*)&ctx->shader_temp;
 }
 #undef COPY_CODE
@@ -562,6 +583,7 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 
 static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 {
+#ifdef QPU_DEBUG
     LOG_DEBUG("Compiling shader for ident=0x%lx\n", ident);
     if (ident & IDENT_MASK_Z_TEST) {
         LOG_DEBUG("\tZ test, Mode=%lu\n", IDENT_GET_ZMODE(ident));
@@ -578,6 +600,10 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     if (ident & IDENT_MASK_BLEND) {
         LOG_DEBUG("\tAlpha blend src=%lu dst=%lu\n", IDENT_GET_BLEND_SRC(ident), IDENT_GET_BLEND_DST(ident));
     }
+    if (ident & IDENT_MASK_ALPHA_TEST) {
+        LOG_DEBUG("\tAlpha test mode=%lu\n", IDENT_GET_ALPHA_TEST(ident));
+    }
+#endif
 
     SYSBASE;
     VC4D_Shader* s = AllocVec(sizeof(*s), MEMF_CLEAR|MEMF_PUBLIC);
@@ -587,7 +613,9 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     }
     s->ident = ident;
     ULONG body_size = make_body(vc4d, ctx, ident);
+#ifdef QPU_DEBUG
     LOG_DEBUG("bodysize = %lu\n", body_size);
+#endif
     if (body_size > sizeof(ctx->shader_temp)) {
         LOG_ERROR("BUFFER OVERFLOWED!!!\n");
     }
@@ -598,11 +626,11 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     }
 
 #if 0
-    if (ident & IDENT_MASK_BLEND) {
+    if (ident & IDENT_MASK_ALPHA_TEST) {
         for (ULONG i = 0; i < body_size/8; ++i) {
             uint32_t w0 = ctx->shader_temp[i*2+0];
             uint32_t w1 = ctx->shader_temp[i*2+1];
-            LOG_DEBUG("\t0x%08lx, 0x%08lx\n", w0, w1);
+            LOG_DEBUG("\t0x%08lx, 0x%08lx,\n", w0, w1);
         }
     }
 #endif
@@ -614,13 +642,16 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         shader_bytes += sizeof(qpu_load_tex);
     if (ident & IDENT_MASK_INTERP_COLOR)
         shader_bytes += sizeof(qpu_load_color);
+    if (ident & IDENT_MASK_ALPHA_TEST)
+        shader_bytes += sizeof(qpu_load_alpha_ref);
 
     uint32_t loop_icnt;
     const uint32_t* loop;
 
-    // TODO: Use IDENT_GET_ZMODE
     if (ident & (IDENT_MASK_Z_TEST | IDENT_MASK_Z_UPDATE)) {
+#ifdef QPU_DEBUG
         LOG_DEBUG("Creating shader for ZMode = %lu (update? %s)\n", IDENT_GET_ZMODE(ident), ident & IDENT_MASK_Z_UPDATE ? "yes" : "no");
+#endif
 
         switch (IDENT_GET_ZMODE(ident)) {
         default:
@@ -652,9 +683,7 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     if ((ULONG)end - (ULONG)s->code_mem.hostptr > shader_bytes) {
         LOG_ERROR("Invalid shader size! %lu > %lu\n", (ULONG)end - (ULONG)s->code_mem.hostptr, shader_bytes);
     }
-    LOG_DEBUG("Code merged\n");
     CacheClearE(s->code_mem.hostptr, shader_bytes, CACRF_ClearD);
-    LOG_DEBUG("Shader done\n");
     return s;
 }
 
@@ -691,6 +720,8 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
         ident |= IDENT_MASK_INTERP_UV;
     if (mode & W3D_BLENDING)
         ident |= IDENT_MASK_BLEND | IDENT_SET_BLEND_SRC(ctx->blend_srcmode) | IDENT_SET_BLEND_DST(ctx->blend_dstmode);
+    if (mode & W3D_ALPHATEST)
+        ident |= IDENT_MASK_ALPHA_TEST | IDENT_SET_ALPHA_TEST(ctx->alpha_test);
 
     int new_job = !ctx->building_job;
     if (!ctx->cur_shader || ctx->cur_shader->ident != ident) {
