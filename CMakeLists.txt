@@ -37,6 +37,9 @@ if (FALSE)
     #set_source_files_properties(cppsupport.c PROPERTIES COMPILE_FLAGS -fno-aggressive-loop-optimizations)
 else()
     add_definitions(-DPISTORM32)
+
+    qasm(clear_region)
+
     qasm(outer_loop)
     qasm(loop_z_none)
     qasm(loop_z_less)

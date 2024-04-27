@@ -10,6 +10,8 @@
 
 static void ser_putch(UBYTE ch __asm("d0"), void* context __asm("a3"))
 {
+    if (!ch)
+        return;
     (void)context;
     // Wait for TBE
     while (!(SERDATR & (1<<13)))

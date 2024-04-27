@@ -78,6 +78,7 @@ typedef struct VC4D_Context {
 
 #ifdef PISTORM32
     vc4_mem uniform_mem;
+    vc4_mem clear_region_mem;
 
     ULONG shader_temp[512];
     VC4D_Shader* shader_hash[VC4D_SHADER_HASH_SIZE];

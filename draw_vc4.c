@@ -279,6 +279,10 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     ++*unif; // Increment number of triangles
 }
 
+static const uint32_t qpu_clear_region[] = {
+#include "clear_region.h"
+};
+
 static const uint32_t qpu_outer_loop[] = {
 #include "outer_loop.h"
 };
@@ -520,8 +524,9 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         }
     } else {
         // TODO: Handle flat shading
-        if (!(ident & IDENT_MASK_INTERP_COLOR))
+        if (!(ident & IDENT_MASK_INTERP_COLOR)) {
             LOG_DEBUG("%s: TODO: Flat shading! Ident=0x%lx\n", __func__, ident);
+        }
         COPY_CODE(qpu_copy_interpolated_color);
     }
 
@@ -693,7 +698,7 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
 
     int ret = vc4_mem_alloc(vc4d, &s->code_mem, shader_bytes);
     if (ret) {
-        LOG_ERROR("Failed to allocate memory for shader code\n", ret);
+        LOG_ERROR("Failed to allocate memory for shader code: %ld\n", ret);
         FreeVec(s);
         return NULL;
     }
@@ -798,4 +803,46 @@ void draw_flush(VC4D* vc4d, VC4D_Context* ctx)
         frame = 0;
     }
 #endif
+}
+
+int draw_init(VC4D* vc4d, VC4D_Context* ctx)
+{
+    int ret = vc4_mem_alloc(vc4d, &ctx->clear_region_mem, sizeof(qpu_clear_region));
+    if (ret) {
+        LOG_ERROR("Failed to allocate memory for shader code: %ld\n", ret);
+        return ret;
+    }
+    ULONG* d = ctx->clear_region_mem.hostptr;
+    for (ULONG i = 0; i < sizeof(qpu_clear_region) / sizeof(*qpu_clear_region); ++i)
+        *d++ = LE32(qpu_clear_region[i]);
+    SYSBASE;
+    CacheClearE(ctx->clear_region_mem.hostptr, sizeof(qpu_clear_region), CACRF_ClearD);
+    return 0;
+}
+
+void draw_clear_region(VC4D* vc4d, VC4D_Context* ctx, ULONG dst_bus, ULONG width, ULONG height, ULONG rowdelta, ULONG value)
+{
+    draw_flush(vc4d, ctx);
+
+    if (!width || height < VC4_MAX_QPUS) {
+        LOG_ERROR("%s: Invalid size: %lu x %lu\n", __func__, width, height);
+        return;
+    }
+
+    if (width % 16) {
+        LOG_ERROR("%s: Invalid width: %lu\n", __func__, width);
+        width &= ~15;
+    }
+
+    ULONG* unif = ctx->uniform_mem.hostptr;
+    ULONG idx = 0;
+    unif[idx++] = LE32(width / 16);
+    unif[idx++] = LE32(height);
+    unif[idx++] = LE32(dst_bus);
+    unif[idx++] = LE32(rowdelta);
+    unif[idx++] = LE32(value);
+    SYSBASE;
+    CacheClearE(ctx->uniform_mem.hostptr, idx * 4, CACRF_ClearD);
+    vc4_run_qpu(vc4d, VC4_MAX_QPUS, ctx->clear_region_mem.busaddr, ctx->uniform_mem.busaddr);
+    vc4_wait_qpu(vc4d);
 }

@@ -86,6 +86,7 @@ void W3D_DestroyContext(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"
 #ifdef PISTORM32
     VC4D_Context* vctx = (VC4D_Context*)context;
     vc4_mem_free(vc4d, &vctx->uniform_mem);
+    vc4_mem_free(vc4d, &vctx->clear_region_mem);
 
     for (ULONG i = 0; i < VC4D_SHADER_HASH_SIZE; ++i) {
         for (VC4D_Shader* s = vctx->shader_hash[i], *next; s; s = next) {
@@ -152,6 +153,13 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
     if (!context) {
         *error = W3D_NOMEMORY;
         LOG_ERROR("W3D_CreateContext: Out of memory\n");
+        return NULL;
+    }
+
+    if (draw_init(vc4d, (VC4D_Context*)context)) {
+        *error = W3D_NOMEMORY;
+        LOG_ERROR("W3D_CreateContext: draw_init failed\n");
+        FreeVec(context);
         return NULL;
     }
 
@@ -484,7 +492,7 @@ W3D_GetTexFmtInfo(W3D_Context * context __asm("a0"), ULONG format __asm("d0"), U
 }
 
 #if TRACE_LEVEL
-static const char* const FormatNames[12] = {
+static const char* const FormatNames[W3D_R8G8B8A8 + 1] = {
     "Invalid",
     "W3D_CHUNKY",
     "W3D_A1R5G5B5",
@@ -547,10 +555,10 @@ W3D_Texture* W3D_AllocTexObj(W3D_Context * context __asm("a0"), ULONG * error __
 #endif
     LOG_DEBUG("%s: %lux%lu %s\n", __func__, width, height, format <= W3D_R8G8B8A8 ? FormatNames[format] : "<Invalid>");
     if (mimap || usermip) {
-        LOG_DEBUG("%s: TODO support mipmaps\n");
+        LOG_DEBUG("%s: TODO support mipmaps\n", __func__);
     }
     if (palette) {
-        LOG_DEBUG("%s: TODO support palette\n");
+        LOG_DEBUG("%s: TODO support palette\n", __func__);
     }
 
     if (!image || !format || format > W3D_R8G8B8A8 || !width || !height) {
@@ -719,6 +727,12 @@ static void ConvertTexRow(ULONG* d, const UBYTE* s, ULONG n, ULONG format, VC4D*
             UWORD val = *(UWORD*)s;
             *d++ = TEX_ENDIAN(255 << 24 | Expand5_8(val >> 11) << 16 | Expand6_8(val >> 5) << 8 | Expand5_8(val));
             s += 2;
+        }
+    } else if (format == W3D_L8A8) {
+        while (n--) {
+            const UBYTE l = *s++;
+            const UBYTE a = *s++;
+            *d++ = TEX_ENDIAN(a << 24 | l << 16 | l << 8 | l);
         }
     } else {
         LOG_ERROR("TODO: Support texture format: %s\n", FormatNames[format]);
@@ -1066,22 +1080,9 @@ W3D_ClearZBuffer(W3D_Context * context __asm("a0"), W3D_Double * clearvalue __as
 {
     TRACE();
 #ifdef PISTORM32
-    // TODO: Use QPUs...
     VC4D_Context* vctx = (VC4D_Context*)context;
-    ULONG* buffer = vctx->zbuffer_mem.hostptr;
-    if (!buffer) {
-        LOG_ERROR("%s: No zbuffer\n", __func__);
-        return W3D_NOZBUFFER;
-    }
-    union {
-        float f;
-        ULONG u;
-    } u = { .f = *clearvalue };
-    const ULONG val = LE32(u.u);
-    for (ULONG i = vctx->width * vctx->height; i--; )
-        *buffer++ = val;
-    SYSBASE;
-    CacheClearE(vctx->zbuffer_mem.hostptr, vctx->width * vctx->height * 4, CACRF_ClearD);
+    float val = *clearvalue;
+    draw_clear_region(vc4d, vctx, vctx->zbuffer_mem.busaddr, vctx->width, vctx->height, vctx->width * 4, *(ULONG*)&val);
     TRACE();
 #endif
     return W3D_SUCCESS;
@@ -1697,8 +1698,7 @@ W3D_SetChromaTestBounds(     W3D_Context * context __asm("a0"),
     return W3D_UNSUPPORTED;
 }
 
-ULONG
-W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), VC4D* vc4d __asm("a6"))
+ULONG W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), VC4D* vc4d __asm("a6"))
 {
     TRACE();
     if (!context->HWlocked) {
@@ -1706,17 +1706,16 @@ W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), 
         return W3D_UNSUPPORTED;
     }
 
-    // TODO: Optimize, want gneric QPU clear routine...
-    // Maybe just use W3D itself while backing up registers...
-
-    uint32_t smodulo = context->bprow / sizeof(uint32_t);
-    uint32_t* screen = (uint32_t*)context->vmembase + smodulo * context->yoffset;
-
     const int clip_x0 = context->scissor.left;
     const int clip_x1 = context->scissor.left + context->scissor.width;
     const int clip_y0 = context->scissor.top;
     const int clip_y1 = context->scissor.top + context->scissor.height;
+    uint32_t smodulo = context->bprow / sizeof(uint32_t);
+    uint32_t* screen = (uint32_t*)context->vmembase + smodulo * context->yoffset;
 
+#ifdef PISTORM32
+    draw_clear_region(vc4d, (VC4D_Context*)context, PHYS_TO_BUS(screen), clip_x1 - clip_x0, clip_y1 - clip_y0, context->bprow, color);
+#else
     color = LE32(color);
 
     for (int y = clip_y0; y < clip_y1; ++y) {
@@ -1724,9 +1723,7 @@ W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("d0"), 
             screen[x + y * smodulo] = color;
         }
     }
-
-    SYSBASE;
-    CacheClearE(screen + clip_y0 * context->bprow, (clip_y1 - clip_y0) * context->bprow, CACRF_ClearD);
+#endif
 
     return W3D_SUCCESS;
 }
