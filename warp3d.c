@@ -685,25 +685,8 @@ W3D_SetWrapMode(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("
     return W3D_SUCCESS;
 }
 
-ULONG W3D_UpdateTexImage(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1"), void * teximage __asm("a2"), int level __asm("d1"), ULONG * palette __asm("a3"), VC4D* vc4d __asm("a6"))
+static void ConvertTexRow(ULONG* d, const UBYTE* s, ULONG n, ULONG format, VC4D* vc4d)
 {
-    TRACE();
-    if (level) {
-        LOG_DEBUG("%s: TODO update mip map level %lu\n", __func__, level);
-        return W3D_SUCCESS;
-    }
-
-#ifdef PISTORM32
-    ULONG* d = ((VC4D_Texture*)texture)->texture_mem.hostptr;
-#else
-    ULONG* d = texture->texdata;
-#endif
-
-    const ULONG format = texture->texfmtsrc;
-    texture->texsource = (APTR)teximage;
-    UBYTE* s = (APTR)teximage;
-    ULONG n = texture->texwidth * texture->texheight;
-
     if (format == W3D_A8R8G8B8) {
         while (n--) {
             *d++ = TEX_ENDIAN(s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3]);
@@ -738,8 +721,30 @@ ULONG W3D_UpdateTexImage(W3D_Context * context __asm("a0"), W3D_Texture * textur
             s += 2;
         }
     } else {
-        LOG_ERROR("TODO: Support texture format: %s\n", FormatNames[texture->texfmtsrc]);
+        LOG_ERROR("TODO: Support texture format: %s\n", FormatNames[format]);
     }
+}
+
+ULONG W3D_UpdateTexImage(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1"), void * teximage __asm("a2"), int level __asm("d1"), ULONG * palette __asm("a3"), VC4D* vc4d __asm("a6"))
+{
+    TRACE();
+    if (level) {
+        LOG_DEBUG("%s: TODO update mip map level %lu\n", __func__, level);
+        return W3D_SUCCESS;
+    }
+
+#ifdef PISTORM32
+    ULONG* d = ((VC4D_Texture*)texture)->texture_mem.hostptr;
+#else
+    ULONG* d = texture->texdata;
+#endif
+
+    const ULONG format = texture->texfmtsrc;
+    texture->texsource = (APTR)teximage;
+    UBYTE* s = (APTR)teximage;
+    ULONG n = texture->texwidth * texture->texheight;
+
+    ConvertTexRow(d, s, n, format, vc4d);
 
 #ifdef PISTORM32
     SYSBASE;
@@ -763,7 +768,7 @@ W3D_DrawLine(     W3D_Context * context __asm("a0"),
      W3D_Line * line __asm("a1"),
  VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    //TODO(__func__);
     return W3D_UNSUPPORTED;
 }
 
@@ -884,28 +889,22 @@ ULONG W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triang
         return W3D_UNSUPPORTED;
     }
 
-    TODO(__func__); // XXX: See W3D_DrawTriStripV
-
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
     const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
-    init_vertex(&a, &triangles->v[0], perspective);
-    init_vertex(&b, &triangles->v[1], perspective);
-    init_vertex(&c, &triangles->v[2], perspective);
 
-
-    // XXX order
-
-    draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
-    vertex* v1 = &a;
-    vertex* v2 = &b;
-    vertex* v3 = &c;
-    for (int i = 3; i < triangles->vertexcount; ++i) {
-        VSWAP(v1,v2);
-        VSWAP(v2,v3);
-        init_vertex(v3, &triangles->v[i], perspective);
-        draw_triangle(vc4d, (VC4D_Context*)context, v1, v2, v3);
+    for (int i = 0; i < triangles->vertexcount - 2; ++i) {
+        if (i & 1) {
+            init_vertex(&a, &triangles->v[i + 1], perspective);
+            init_vertex(&b, &triangles->v[i + 0], perspective);
+            init_vertex(&c, &triangles->v[i + 2], perspective);
+        } else {
+            init_vertex(&a, &triangles->v[i + 0], perspective);
+            init_vertex(&b, &triangles->v[i + 1], perspective);
+            init_vertex(&c, &triangles->v[i + 2], perspective);
+		}
+		draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     }
 
     return W3D_SUCCESS;
@@ -929,7 +928,8 @@ ULONG W3D_SetAlphaMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d1")
         "W3D_A_EQUAL",      /* draw, if value == refvalue */
         "W3D_A_ALWAYS",     /* always draw */
     };
-    if (mode != W3D_A_GREATER)
+
+    if (mode != W3D_A_GEQUAL && mode != W3D_A_GREATER)
         TODOX("%s: mode = %s\n", __func__, alpha_mode_strings[mode - 1]);
 #endif
 
@@ -968,12 +968,6 @@ W3D_SetBlendMode(W3D_Context * context __asm("a0"), ULONG srcfunc __asm("d0"), U
     };
 #endif
 
-//W3D_SRC_ALPHA, W3D_ONE
-//W3D_SRC_ALPHA, W3D_ONE_MINUS_SRC_COLOR
-//W3D_ZERO, W3D_ONE_MINUS_SRC_ALPHA
-//W3D_ZERO, W3D_ONE_MINUS_SRC_COLOR
-
-
     if (srcfunc < W3D_ZERO || srcfunc > W3D_ONE_MINUS_CONSTANT_ALPHA ||
             dstfunc < W3D_ZERO || dstfunc > W3D_ONE_MINUS_CONSTANT_ALPHA) {
         LOG_ERROR("%s: Invalid blend mode %lu, %lu\n", __func__, srcfunc, dstfunc);
@@ -982,7 +976,7 @@ W3D_SetBlendMode(W3D_Context * context __asm("a0"), ULONG srcfunc __asm("d0"), U
 
     ((VC4D_Context*)context)->blend_srcmode = srcfunc;
     ((VC4D_Context*)context)->blend_dstmode = dstfunc;
-    if (srcfunc >= W3D_DST_ALPHA || dstfunc >= W3D_DST_ALPHA) {
+    if (srcfunc >= W3D_SRC_ALPHA_SATURATE || dstfunc >= W3D_SRC_ALPHA_SATURATE) {
         LOG_DEBUG("%s: TODO %s, %s\n", __func__, blend_mode_strings[srcfunc-1], blend_mode_strings[dstfunc-1]);
     }
     return W3D_SUCCESS;
@@ -1009,7 +1003,16 @@ W3D_SetDrawRegion(W3D_Context * context __asm("a0"), struct BitMap * bm __asm("a
 ULONG
 W3D_SetFogParams(W3D_Context * context __asm("a0"), W3D_Fog * fogparams __asm("a1"), ULONG fogmode __asm("d1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    //TODO(__func__);
+    context->fog = *fogparams;
+#if 0
+/* fog modes */
+
+#define W3D_FOG_LINEAR          1       /* linear fogging */
+#define W3D_FOG_EXP             2       /* exponential fogging */
+#define W3D_FOG_EXP_2           3       /* square exponential fogging */
+#define W3D_FOG_INTERPOLATED    4       /* interpolated fogging */ 
+#endif
     return W3D_SUCCESS;
 }
 
@@ -1129,7 +1132,7 @@ ULONG W3D_SetZCompareMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d
         return W3D_ILLEGALINPUT;
     }
 #if TRACE_LEVEL > 1
-    if (mode != W3D_Z_LESS && mode != W3D_Z_LEQUAL) {
+    if (mode != W3D_Z_LESS && mode != W3D_Z_LEQUAL && mode != W3D_Z_EQUAL) {
         const char* const mode_string[8] = {
             "W3D_Z_NEVER",
             "W3D_Z_LESS",
@@ -1352,7 +1355,7 @@ W3D_WriteZSpan(W3D_Context * context __asm("a0"), ULONG x __asm("d0"), ULONG y _
 ULONG
 W3D_SetCurrentColor(W3D_Context * context __asm("a0"), W3D_Color * color __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    ((VC4D_Context*)context)->fixedcolor = *color;
     return W3D_SUCCESS;
 }
 
@@ -1365,18 +1368,50 @@ W3D_SetCurrentPen(     W3D_Context * context __asm("a0"),
     return W3D_UNSUPPORTED;
 }
 
-ULONG
-W3D_UpdateTexSubImage(     W3D_Context * context __asm("a0"),
-     W3D_Texture * texture __asm("a1"),
-     void * teximage __asm("a2"),
-     ULONG lev __asm("d1"),
-     ULONG * palette __asm("a3"),
-     W3D_Scissor* scissor __asm("a4"),
-     ULONG srcbpr __asm("d0"),
- VC4D* vc4d __asm("a6"))
+//static inline int iclip(int val, int vmin, int vmax)
+
+ULONG W3D_UpdateTexSubImage(W3D_Context * context __asm("a0"), W3D_Texture * texture __asm("a1"), void * teximage __asm("a2"), ULONG lev __asm("d1"), ULONG * palette __asm("a3"), W3D_Scissor* scissor __asm("a4"), ULONG srcbpr __asm("d0"), VC4D* vc4d __asm("a6"))
 {
-    TODOX("%s: lev=%ld\n", __func__, lev);
-    return W3D_UNSUPPORTED;
+    TRACE();
+    if (lev) {
+        TODOX("%s: lev=%ld - Update MipMap\n", __func__, lev);
+        return W3D_SUCCESS;
+    }
+    if (!srcbpr) {
+        TODOX("%s: lev=%ld %ld,%ld %ldx%ld srcbpr=%lu !!!\n", __func__, lev, scissor->left, scissor->top, scissor->width, scissor->height, srcbpr);
+        srcbpr = scissor->width * 3; // XXX: May be set to zero to indicate that image data ans scissor size match.
+    }
+
+    const int x0 = iclip(scissor->left, 0, (int)texture->texwidth);
+    const int x1 = iclip(scissor->left + scissor->width, 0, (int)texture->texwidth);
+    const int y0 = iclip(scissor->top, 0, (int)texture->texheight);
+    const int y1 = iclip(scissor->top + scissor->height, 0, (int)texture->texheight);
+
+    const ULONG format = texture->texfmtsrc;
+    texture->texsource = (APTR)teximage;
+    const UBYTE* s = (APTR)teximage;
+#ifdef PISTORM32
+    ULONG* d = ((VC4D_Texture*)texture)->texture_mem.hostptr;
+#else
+    ULONG* d = texture->texdata;
+#endif
+    d += x0 + y0 * texture->texwidth;
+    const int w = x1 - x0;
+    const int h = y1 - y0;
+
+    for (int y = 0; y < h; ++y) {
+        ConvertTexRow(d, s, w, format, vc4d);
+        s += srcbpr;
+        d += texture->texwidth;
+    }
+
+
+#ifdef PISTORM32
+    SYSBASE;
+    CacheClearE((UBYTE*)((VC4D_Texture*)texture)->texture_mem.hostptr + y0 * texture->texwidth * 4, h * texture->texwidth * 4, CACRF_ClearD);
+#endif
+
+    return W3D_SUCCESS;
 }
 
 ULONG

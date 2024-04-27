@@ -13,7 +13,7 @@ endif()
 
 set(QASM_HEADERS "")
 
-add_definitions(-DTRACE_LEVEL=0)
+add_definitions(-DTRACE_LEVEL=2)
 
 macro(qasm name)
     set(dst ${CMAKE_CURRENT_BINARY_DIR}/${name}.h)
@@ -43,6 +43,8 @@ else()
     qasm(loop_z_less_update)
     qasm(loop_z_lequal)
     qasm(loop_z_lequal_update)
+    qasm(loop_z_equal)
+    qasm(loop_z_equal_update)
     qasm(body)
     qasm(load_z)
     qasm(load_tex)
@@ -66,11 +68,14 @@ else()
     qasm(w3d_one_minus_dst_color)
     qasm(w3d_src_alpha)
     qasm(w3d_one_minus_src_alpha)
+    qasm(w3d_dst_alpha)
+    qasm(w3d_one_minus_dst_alpha)
 
     # AlphaTest
     qasm(load_alpha_ref)
 
     qasm(w3d_a_greater)
+    qasm(w3d_a_gequal)
 
     set(DRAW_FILES
         vc4.c

@@ -84,6 +84,9 @@
     mov.ifz     r0,-1
     .elseif Z_MODE == W3D_Z_LEQUAL
     fsub        r0,r2,r3
+    .elseif Z_MODE == W3D_Z_EQUAL
+    fsub.setf   -,r2,r3
+    mov.ifnz    r0,-1
     .else
     assert 0 # TODO
     .endif

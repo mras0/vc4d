@@ -125,4 +125,20 @@ typedef struct VC4D_Texture {
 
 extern void log_debug(VC4D* vc4d, const char* fmt, ...);
 
+static inline int imin(int a, int b)
+{
+    return a < b ? a : b;
+}
+
+static inline int imax(int a, int b)
+{
+    return a > b ? a : b;
+}
+
+
+static inline int iclip(int val, int vmin, int vmax)
+{
+    return imin(imax(val, vmin), vmax);
+}
+
 #endif

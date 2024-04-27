@@ -42,21 +42,6 @@ static inline float orient2d(const vertex* a, const vertex* b, const vertex* c)
     return (b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x);
 }
 
-static inline int imin(int a, int b)
-{
-    return a < b ? a : b;
-}
-
-static inline int imax(int a, int b)
-{
-    return a > b ? a : b;
-}
-
-static inline int iclip(int val, int vmin, int vmax)
-{
-    return imin(imax(val, vmin), vmax);
-}
-
 static inline float fmin3(float a, float b, float c)
 {
     return FMIN(a, FMIN(b, c));
@@ -319,6 +304,12 @@ static const uint32_t qpu_loop_z_lequal[] = {
 static const uint32_t qpu_loop_z_lequal_update[] = {
 #include "loop_z_lequal_update.h"
 };
+static const uint32_t qpu_loop_z_equal[] = {
+#include "loop_z_equal.h"
+};
+static const uint32_t qpu_loop_z_equal_update[] = {
+#include "loop_z_equal_update.h"
+};
 
 static const uint32_t qpu_copy_interpolated_color[] = {
 #include "copy_interpolated_color.h"
@@ -392,8 +383,17 @@ static const uint32_t qpu_w3d_src_alpha[] = {
 static const uint32_t qpu_w3d_one_minus_src_alpha[] = {
 #include "w3d_one_minus_src_alpha.h"
 };
+static const uint32_t qpu_w3d_dst_alpha[] = {
+#include "w3d_dst_alpha.h"
+};
+static const uint32_t qpu_w3d_one_minus_dst_alpha[] = {
+#include "w3d_one_minus_dst_alpha.h"
+};
 
 // Alpha testing
+static const uint32_t qpu_w3d_a_gequal[] = {
+#include "w3d_a_gequal.h"
+};
 static const uint32_t qpu_w3d_a_greater[] = {
 #include "w3d_a_greater.h"
 };
@@ -520,6 +520,8 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
         }
     } else {
         // TODO: Handle flat shading
+        if (!(ident & IDENT_MASK_INTERP_COLOR))
+            LOG_DEBUG("%s: TODO: Flat shading! Ident=0x%lx\n", __func__, ident);
         COPY_CODE(qpu_copy_interpolated_color);
     }
 
@@ -544,7 +546,9 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     X(W3D_ONE_MINUS_SRC_COLOR            , qpu_w3d_one_minus_src_color) \
     X(W3D_ONE_MINUS_DST_COLOR            , qpu_w3d_one_minus_dst_color) \
     X(W3D_SRC_ALPHA                      , qpu_w3d_src_alpha) \
-    X(W3D_ONE_MINUS_SRC_ALPHA            , qpu_w3d_one_minus_src_alpha)
+    X(W3D_ONE_MINUS_SRC_ALPHA            , qpu_w3d_one_minus_src_alpha) \
+    X(W3D_DST_ALPHA                      , qpu_w3d_dst_alpha) \
+    X(W3D_ONE_MINUS_DST_ALPHA            , qpu_w3d_one_minus_dst_alpha)
 
         switch (IDENT_GET_BLEND_SRC(ident)) {
 #define SRC_CASE(name, bcode) case name: COPY_CODE(bcode); break;
@@ -571,8 +575,16 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     }
 
     if (ident & IDENT_MASK_ALPHA_TEST) {
-        // XXX assume W3D_A_GREATER
-        COPY_CODE(qpu_w3d_a_greater);
+        switch (IDENT_GET_ALPHA_TEST(ident)) {
+        default:
+            LOG_DEBUG("TODO: Support alpha test mode %lu\n", IDENT_GET_ALPHA_TEST(ident));
+        case W3D_A_GEQUAL:
+            COPY_CODE(qpu_w3d_a_gequal);
+            break;
+        case W3D_A_GREATER:
+            COPY_CODE(qpu_w3d_a_greater);
+            break;
+        }
     }
 
     return (UBYTE*)code - (UBYTE*)&ctx->shader_temp;
@@ -667,6 +679,12 @@ static VC4D_Shader* make_shader(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
                 SET_LOOP(qpu_loop_z_lequal_update);
             else
                 SET_LOOP(qpu_loop_z_lequal);
+            break;
+        case W3D_Z_EQUAL:
+            if (ident & IDENT_MASK_Z_UPDATE)
+                SET_LOOP(qpu_loop_z_equal_update);
+            else
+                SET_LOOP(qpu_loop_z_equal);
             break;
         }
     } else {
