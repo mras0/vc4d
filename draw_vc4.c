@@ -130,9 +130,6 @@ static void init_job(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
     job->num_uniforms = 0;
     job->shader_bus = ctx->cur_shader->code_mem.busaddr;
     unif[job->num_uniforms++] = 0; // Number of triangles
-    unif[job->num_uniforms++] = ctx->texinfo[0]; // tex addr
-    unif[job->num_uniforms++] = ctx->texinfo[1]; // tex w
-    unif[job->num_uniforms++] = ctx->texinfo[2]; // tex h
     ctx->building_job = TRUE;
 }
 
@@ -261,6 +258,9 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     }
 
     if (ident & IDENT_MASK_INTERP_UV) {
+        unif[idx++] = ctx->texinfo[0]; // tex addr
+        unif[idx++] = ctx->texinfo[1]; // tex w
+        unif[idx++] = ctx->texinfo[2]; // tex h
         VARYING(u);
         VARYING(v);
     }
@@ -782,15 +782,12 @@ void draw_setup(VC4D* vc4d, VC4D_Context* ctx, const VC4D_Texture* tex)
         }
     }
 
-    if (ctx->cur_tex != tex) {
-        new_job = 1;
-        if (tex) {
-            ctx->texinfo[0] = LE32(tex->texture_mem.busaddr);
-            ctx->texinfo[1] = LE32(tex->w3d.texwidth);
-            ctx->texinfo[2] = LE32(tex->w3d.texheight);
-        }
-        ctx->cur_tex = tex;
+    if (tex) {
+        ctx->texinfo[0] = LE32(tex->texture_mem.busaddr);
+        ctx->texinfo[1] = LE32(tex->w3d.texwidth);
+        ctx->texinfo[2] = LE32(tex->w3d.texheight);
     }
+    ctx->cur_tex = tex;
 
     if (new_job) {
         end_job(vc4d, ctx);

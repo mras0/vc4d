@@ -55,7 +55,7 @@ typedef struct VC4D_QPU_Job {
 } VC4D_QPU_Job;
 
 // TODO: Maybe look into tweaking these numbers
-#define QPU_UNIFORMS_PER_JOB 1024
+#define QPU_UNIFORMS_PER_JOB 8192
 #define QPU_NUM_JOBS 8
 
 #endif
