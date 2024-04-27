@@ -50,8 +50,8 @@ static inline BOOL SetScissor(VC4D* vc4d, VC4D_Context* vctx, const W3D_Scissor*
 {
     // Maybe just clip the region instead?
     // Also need to consider yoffset..
-    if ((ULONG)scissor->left < vctx->width && (ULONG)(scissor->left + scissor->width) <= vctx->width &&
-            (ULONG)scissor->top < vctx->height && (ULONG)(scissor->top + scissor->height) <= vctx->height) {
+    if (scissor->left < vctx->w3d.width && scissor->left + scissor->width <= vctx->w3d.width &&
+            scissor->top < vctx->w3d.height && scissor->top + scissor->height <= vctx->w3d.height) {
         vctx->w3d.scissor = *scissor;
         return TRUE;
     } else {
@@ -183,8 +183,8 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
 
     VC4D_Context* vctx = (VC4D_Context*)context;
 
-    vctx->width = context->scissor.width;
-    vctx->height = context->scissor.height;
+    context->width = context->scissor.width;
+    context->height = context->scissor.height;
 
     NewList((struct List*)&context->tex);
     NewList((struct List*)&context->restex);
@@ -364,6 +364,11 @@ W3D_LockHardware(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6"))
 
     UnLockBitMap(context->gfxdriver);
     TRACE();
+
+    // Assumed for Z-buffer
+    if (context->bprow != 4 * context->width) {
+        LOG_ERROR("%s: Unexpected bprow! %lu != %lu\n", __func__, context->bprow, 4 * context->width);
+    }
 
     context->HWlocked = W3D_TRUE;
     return W3D_SUCCESS;
@@ -859,7 +864,7 @@ ULONG W3D_SetAlphaMode(W3D_Context * context __asm("a0"), ULONG mode __asm("d1")
         "W3D_A_ALWAYS",     /* always draw */
     };
 
-    if (mode != W3D_A_GEQUAL && mode != W3D_A_GREATER)
+    if (mode != W3D_A_GEQUAL && mode != W3D_A_GREATER && mode != W3D_A_NOTEQUAL)
         TODOX("%s: mode = %s\n", __func__, alpha_mode_strings[mode - 1]);
 #endif
 
@@ -980,7 +985,7 @@ ULONG W3D_AllocZBuffer(W3D_Context * context __asm("a0"), VC4D* vc4d __asm("a6")
     W3D_FreeZBuffer(context, vc4d);
 #ifdef PISTORM32
     VC4D_Context* vctx = (VC4D_Context*)context;
-    int ret = vc4_mem_alloc(vc4d, &vctx->zbuffer_mem, vctx->width * vctx->height * 4);
+    int ret = vc4_mem_alloc(vc4d, &vctx->zbuffer_mem, context->width * context->height * 4);
     if (ret) {
         LOG_ERROR("%s: Failed to allocate z-buffer! %ld\n", __func__, ret);
         return W3D_NOGFXMEM;
@@ -998,7 +1003,7 @@ W3D_ClearZBuffer(W3D_Context * context __asm("a0"), W3D_Double * clearvalue __as
 #ifdef PISTORM32
     VC4D_Context* vctx = (VC4D_Context*)context;
     float val = *clearvalue;
-    draw_clear_region(vc4d, vctx, vctx->zbuffer_mem.busaddr, vctx->width, vctx->height, vctx->width * 4, *(ULONG*)&val);
+    draw_clear_region(vc4d, vctx, vctx->zbuffer_mem.busaddr, context->width, context->height, context->width * 4, *(ULONG*)&val);
     TRACE();
 #endif
     return W3D_SUCCESS;
@@ -1658,8 +1663,8 @@ W3D_SetScissor(W3D_Context * context __asm("a0"), W3D_Scissor * scissor __asm("a
         SetScissor(vc4d, (VC4D_Context*)context, scissor, __func__);
     } else {
         context->scissor.top = context->scissor.left = 0;
-        context->scissor.width = ((VC4D_Context*)context)->width;
-        context->scissor.height = ((VC4D_Context*)context)->height;
+        context->scissor.width = context->width;
+        context->scissor.height = context->height;
     }
 }
 

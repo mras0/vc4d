@@ -406,6 +406,9 @@ static const uint32_t qpu_w3d_a_gequal[] = {
 static const uint32_t qpu_w3d_a_greater[] = {
 #include "w3d_a_greater.h"
 };
+static const uint32_t qpu_w3d_a_notequal[] = {
+#include "w3d_a_notequal.h"
+};
 
 #define BLEND_MAX_INST 20 // XXX
 
@@ -593,6 +596,9 @@ static ULONG make_body(VC4D* vc4d, VC4D_Context* ctx, ULONG ident)
             break;
         case W3D_A_GREATER:
             COPY_CODE(qpu_w3d_a_greater);
+            break;
+        case W3D_A_NOTEQUAL:
+            COPY_CODE(qpu_w3d_a_notequal);
             break;
         }
     }

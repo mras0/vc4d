@@ -79,6 +79,7 @@ else()
 
     qasm(w3d_a_greater)
     qasm(w3d_a_gequal)
+    qasm(w3d_a_notequal)
 
     set(DRAW_FILES
         vc4.c
