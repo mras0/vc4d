@@ -161,8 +161,15 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     if (!ctx->cur_shader)
         return;
 
-    // TODO: Back face culling
+    W3D_Context* wctx = &ctx->w3d;
+
     float area2 = orient2d(v0, v1, v2);
+
+    if (wctx->state & W3D_CULLFACE) {
+        if ((area2 < 0) != wctx->FrontFaceOrder)
+            return;
+    }
+
     if (area2 < 0) {
         const vertex* t = v0;
         v0 = v2;
@@ -187,8 +194,6 @@ void draw_triangle(VC4D* vc4d, VC4D_Context* ctx, const vertex* v0, const vertex
     uint32_t* const unif = ((uint32_t*)ctx->uniform_mem.hostptr) + job_num * QPU_UNIFORMS_PER_JOB;
     uint32_t idx = job->num_uniforms;
 
-
-    W3D_Context* wctx = &ctx->w3d;
 
     const int xMin = wctx->scissor.left;
     const int xMax = wctx->scissor.left + wctx->scissor.width;

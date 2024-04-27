@@ -227,7 +227,7 @@ W3D_Context* W3D_CreateContext(ULONG * error __asm("a0"), struct TagItem * CCTag
 
 #if TRACE_LEVEL > 1
 // N.B. bitmask starting from 0
-static const char* const StateNames[26] = {
+static const char* const StateNames[27] = {
 "W3D_AUTOTEXMANAGEMENT",
 "W3D_SYNCHRON",
 "W3D_INDIRECT",
@@ -254,6 +254,7 @@ static const char* const StateNames[26] = {
 "W3D_TEXMAPPING3D",
 "W3D_SCISSOR",
 "W3D_CHROMATEST",
+"W3D_CULLFACE",
 };
 #endif
 
@@ -267,7 +268,7 @@ ULONG
 W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG action __asm("d1"), VC4D* vc4d __asm("a6"))
 {
     TRACE();
-    if (state < W3D_AUTOTEXMANAGEMENT || state > W3D_CHROMATEST || (state & (state -1)) || (action != W3D_ENABLE && action != W3D_DISABLE)) {
+    if (state < W3D_AUTOTEXMANAGEMENT || state > W3D_CULLFACE || (state & (state -1)) || (action != W3D_ENABLE && action != W3D_DISABLE)) {
         LOG_ERROR("W3D_SetState: Invalid input state=0x%lx action=0x%lx\n", state, action);
         return W3D_UNSUPPORTED;
     }
@@ -310,7 +311,7 @@ W3D_SetState(W3D_Context * context __asm("a0"), ULONG state __asm("d0"), ULONG a
     static ULONG warned[32];
 
     if (!(state & supported)) {
-        for (ULONG i = 0; i < 26; ++i) {
+        for (ULONG i = 0; i < 27; ++i) {
             if (state == (1U << (i+1))) {
                 if (!(warned[i] & action)) {
                     LOG_DEBUG("TODO: W3D_SetState %s %s\n", action == W3D_ENABLE ? "Enable" : "Disable", StateNames[i]);
@@ -394,93 +395,6 @@ W3D_CheckIdle(     W3D_Context * context __asm("a0"),
 {
     TODO(__func__);
     return W3D_SUCCESS;
-}
-
-ULONG
-W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG destfmt __asm("d1"), VC4D* vc4d __asm("a6"))
-{
-    // TODO: Pretend everything is supported for now
-#if TRACE_LEVEL > 1
-#define QUERY(x) case x: { static int warned; if (!warned) { LOG_DEBUG("%s: TODO %s\n", __func__, #x); warned = 1; } } break
-#else
-#define QUERY(x) case x: break;
-#endif
-    switch (query) {
-        case W3D_Q_DRAW_TRIANGLE:
-        case W3D_Q_TEXMAPPING:
-        case W3D_Q_PERSPECTIVE:
-        case W3D_Q_GOURAUDSHADING:
-        case W3D_Q_ZBUFFER:
-        case W3D_Q_ZBUFFERUPDATE:
-        case W3D_Q_BLENDING:
-        case W3D_Q_SRCFACTORS:
-        case W3D_Q_DESTFACTORS:
-            break;
-        case W3D_Q_MAXTEXWIDTH:
-        case W3D_Q_MAXTEXHEIGHT:
-        case W3D_Q_MAXTEXWIDTH_P:
-        case W3D_Q_MAXTEXHEIGHT_P:
-            return 2048;
-    QUERY(W3D_Q_LINEAR_REPEAT);
-    QUERY(W3D_Q_LINEAR_CLAMP);
-    QUERY(W3D_Q_PERSP_REPEAT);
-    QUERY(W3D_Q_PERSP_CLAMP);
-    QUERY(W3D_Q_DRAW_POINT);
-    QUERY(W3D_Q_DRAW_LINE);
-    QUERY(W3D_Q_DRAW_POINT_X);
-    QUERY(W3D_Q_DRAW_LINE_X);
-    QUERY(W3D_Q_DRAW_LINE_ST);
-    QUERY(W3D_Q_DRAW_POLY_ST);
-    QUERY(W3D_Q_DRAW_POINT_FX);
-    QUERY(W3D_Q_DRAW_LINE_FX);
-    QUERY(W3D_Q_MIPMAPPING);
-    QUERY(W3D_Q_BILINEARFILTER);
-    QUERY(W3D_Q_MMFILTER);
-    QUERY(W3D_Q_ENV_REPLACE);
-    QUERY(W3D_Q_ENV_DECAL);
-    QUERY(W3D_Q_ENV_MODULATE);
-    QUERY(W3D_Q_ENV_BLEND);
-    QUERY(W3D_Q_WRAP_ASYM);
-    QUERY(W3D_Q_SPECULAR);
-    QUERY(W3D_Q_BLEND_DECAL_FOG);
-    QUERY(W3D_Q_TEXMAPPING3D);
-    QUERY(W3D_Q_CHROMATEST);
-    QUERY(W3D_Q_FLATSHADING);
-    QUERY(W3D_Q_ZCOMPAREMODES);
-    QUERY(W3D_Q_ALPHATEST);
-    QUERY(W3D_Q_ALPHATESTMODES);
-    QUERY(W3D_Q_ONE_ONE);
-    QUERY(W3D_Q_FOGGING);
-    QUERY(W3D_Q_LINEAR);
-    QUERY(W3D_Q_EXPONENTIAL);
-    QUERY(W3D_Q_S_EXPONENTIAL);
-    QUERY(W3D_Q_INTERPOLATED);
-    QUERY(W3D_Q_ANTIALIASING);
-    QUERY(W3D_Q_ANTI_POINT);
-    QUERY(W3D_Q_ANTI_LINE);
-    QUERY(W3D_Q_ANTI_POLYGON);
-    QUERY(W3D_Q_ANTI_FULLSCREEN);
-    QUERY(W3D_Q_DITHERING);
-    QUERY(W3D_Q_PALETTECONV);
-    QUERY(W3D_Q_SCISSOR);
-    QUERY(W3D_Q_RECTTEXTURES);
-    QUERY(W3D_Q_LOGICOP);
-    QUERY(W3D_Q_MASKING);
-    QUERY(W3D_Q_STENCILBUFFER);
-    QUERY(W3D_Q_STENCIL_MASK);
-    QUERY(W3D_Q_STENCIL_FUNC);
-    QUERY(W3D_Q_STENCIL_SFAIL);
-    QUERY(W3D_Q_STENCIL_DPFAIL);
-    QUERY(W3D_Q_STENCIL_DPPASS);
-    QUERY(W3D_Q_STENCIL_WRMASK);
-    QUERY(W3D_Q_DRAW_POINT_TEX);
-    QUERY(W3D_Q_DRAW_LINE_TEX);
-        default:
-    LOG_ERROR("%s: Unknown query value %lu\n", __func__, query);
-    return W3D_UNSUPPORTED;
-    }
-
-    return W3D_FULLY_SUPPORTED;
 }
 
 ULONG
@@ -795,30 +709,36 @@ W3D_DrawPoint(     W3D_Context * context __asm("a0"),
     return W3D_UNSUPPORTED;
 }
 
-static void init_vertex(vertex* v, const W3D_Vertex* w, BOOL perspective)
+static void init_vertex(vertex* v, const W3D_Vertex* w, W3D_Context* ctx)
 {
     v->x = w->x;
     v->y = w->y;
 
-    if (perspective) {
+    if (ctx->state & W3D_GOURAUD) {
+        v->r = w->color.r;
+        v->g = w->color.g;
+        v->b = w->color.b;
+        v->a = w->color.a;
+    } else {
+        v->r = ((VC4D_Context*)ctx)->fixedcolor.r;
+        v->g = ((VC4D_Context*)ctx)->fixedcolor.g;
+        v->b = ((VC4D_Context*)ctx)->fixedcolor.b;
+        v->a = ((VC4D_Context*)ctx)->fixedcolor.a;
+    }
+
+    if (ctx->state & W3D_PERSPECTIVE) {
         v->w = w->w; // 1->0f / w->z;
         v->u = w->u * v->w;
         v->v = w->v * v->w;
-        v->r = w->color.r * v->w;
-        v->g = w->color.g * v->w;
-        v->b = w->color.b * v->w;
-        v->a = w->color.a * v->w;
-        
-        //v->z = w->z * v->w;
+        v->r *= v->w;
+        v->g *= v->w;
+        v->b *= v->w;
+        v->a *= v->w;
         v->z = w->z;
     } else {
         v->w = 1.0f;
         v->u = w->u;
         v->v = w->v;
-        v->r = w->color.r;
-        v->g = w->color.g;
-        v->b = w->color.b;
-        v->a = w->color.a;
         // Last to avoid amiga-gcc bug (It seems to think fsmoved (a1)+,fp0 only increments a1 by 4..)
         v->z = w->z;
     }
@@ -835,11 +755,9 @@ W3D_DrawTriangle(W3D_Context * context __asm("a0"), W3D_Triangle * triangle __as
 
     vertex a, b, c;
 
-    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
-
-    init_vertex(&a, &triangle->v1, perspective);
-    init_vertex(&b, &triangle->v2, perspective);
-    init_vertex(&c, &triangle->v3, perspective);
+    init_vertex(&a, &triangle->v1, context);
+    init_vertex(&b, &triangle->v2, context);
+    init_vertex(&c, &triangle->v3, context);
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangle->tex);
 
     draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
@@ -866,11 +784,10 @@ ULONG W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangle
 
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
-    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
-    init_vertex(&a, &triangles->v[0], perspective);
-    init_vertex(&b, &triangles->v[1], perspective);
-    init_vertex(&c, &triangles->v[2], perspective);
+    init_vertex(&a, &triangles->v[0], context);
+    init_vertex(&b, &triangles->v[1], context);
+    init_vertex(&c, &triangles->v[2], context);
 
     draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     vertex* v2 = &b;
@@ -878,7 +795,7 @@ ULONG W3D_DrawTriFan(W3D_Context * context __asm("a0"), W3D_Triangles * triangle
     for (int i = 3; i < triangles->vertexcount; ++i) {
         VSWAP(v2, v3);
 
-        init_vertex(v3, &triangles->v[i], perspective);
+        init_vertex(v3, &triangles->v[i], context);
 
         draw_triangle(vc4d, (VC4D_Context*)context, &a, v2, v3);
 
@@ -905,18 +822,17 @@ ULONG W3D_DrawTriStrip(W3D_Context * context __asm("a0"), W3D_Triangles * triang
 
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
-    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
 
     for (int i = 0; i < triangles->vertexcount - 2; ++i) {
         if (i & 1) {
-            init_vertex(&a, &triangles->v[i + 1], perspective);
-            init_vertex(&b, &triangles->v[i + 0], perspective);
-            init_vertex(&c, &triangles->v[i + 2], perspective);
+            init_vertex(&a, &triangles->v[i + 1], context);
+            init_vertex(&b, &triangles->v[i + 0], context);
+            init_vertex(&c, &triangles->v[i + 2], context);
         } else {
-            init_vertex(&a, &triangles->v[i + 0], perspective);
-            init_vertex(&b, &triangles->v[i + 1], perspective);
-            init_vertex(&c, &triangles->v[i + 2], perspective);
+            init_vertex(&a, &triangles->v[i + 0], context);
+            init_vertex(&b, &triangles->v[i + 1], context);
+            init_vertex(&c, &triangles->v[i + 2], context);
 		}
 		draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     }
@@ -1471,20 +1387,108 @@ W3D_GetDrivers( VC4D* vc4d __asm("a6"))
     return (W3D_Driver**)drivers;
 }
 
-ULONG
-W3D_QueryDriver(     W3D_Driver* driver __asm("a0"),
-     ULONG query __asm("d0"),
-     ULONG destfmt __asm("d1"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_QueryDriver(W3D_Driver* driver __asm("a0"), ULONG query __asm("d0"), ULONG destfmt __asm("d1"), VC4D* vc4d __asm("a6"))
 {
-    LOG_DEBUG("W3D_QueryDriver: query=0x%lx destfmt=0x%lx\n", query, destfmt);
+    if (driver == NULL)
+        driver = (W3D_Driver*)&driver;
 
-    if (!(driver->formats & destfmt))
+    if (!(driver->formats & destfmt)) {
+        TODOX("%s: destfmt=%08lx\n", __func__, destfmt);
         return W3D_NOT_SUPPORTED;
+    }
+
+    // TODO: Pretend everything is supported for now
+#if TRACE_LEVEL > 1
+#define QUERY(x) case x: { static int warned; if (!warned) { LOG_DEBUG("%s: TODO %s\n", __func__, #x); warned = 1; } } break
+#else
+#define QUERY(x) case x: break;
+#endif
+    switch (query) {
+        case W3D_Q_DRAW_TRIANGLE:
+        case W3D_Q_TEXMAPPING:
+        case W3D_Q_PERSPECTIVE:
+        case W3D_Q_GOURAUDSHADING:
+        case W3D_Q_ZBUFFER:
+        case W3D_Q_ZBUFFERUPDATE:
+        case W3D_Q_BLENDING:
+        case W3D_Q_SRCFACTORS:
+        case W3D_Q_DESTFACTORS:
+            break;
+        case W3D_Q_MAXTEXWIDTH:
+        case W3D_Q_MAXTEXHEIGHT:
+        case W3D_Q_MAXTEXWIDTH_P:
+        case W3D_Q_MAXTEXHEIGHT_P:
+            return 2048;
+    QUERY(W3D_Q_LINEAR_REPEAT);
+    QUERY(W3D_Q_LINEAR_CLAMP);
+    QUERY(W3D_Q_PERSP_REPEAT);
+    QUERY(W3D_Q_PERSP_CLAMP);
+    QUERY(W3D_Q_DRAW_POINT);
+    QUERY(W3D_Q_DRAW_LINE);
+    QUERY(W3D_Q_DRAW_POINT_X);
+    QUERY(W3D_Q_DRAW_LINE_X);
+    QUERY(W3D_Q_DRAW_LINE_ST);
+    QUERY(W3D_Q_DRAW_POLY_ST);
+    QUERY(W3D_Q_DRAW_POINT_FX);
+    QUERY(W3D_Q_DRAW_LINE_FX);
+    QUERY(W3D_Q_MIPMAPPING);
+    QUERY(W3D_Q_BILINEARFILTER);
+    QUERY(W3D_Q_MMFILTER);
+    QUERY(W3D_Q_ENV_REPLACE);
+    QUERY(W3D_Q_ENV_DECAL);
+    QUERY(W3D_Q_ENV_MODULATE);
+    QUERY(W3D_Q_ENV_BLEND);
+    QUERY(W3D_Q_WRAP_ASYM);
+    QUERY(W3D_Q_SPECULAR);
+    QUERY(W3D_Q_BLEND_DECAL_FOG);
+    QUERY(W3D_Q_TEXMAPPING3D);
+    QUERY(W3D_Q_CHROMATEST);
+    QUERY(W3D_Q_FLATSHADING);
+    QUERY(W3D_Q_ZCOMPAREMODES);
+    QUERY(W3D_Q_ALPHATEST);
+    QUERY(W3D_Q_ALPHATESTMODES);
+    QUERY(W3D_Q_ONE_ONE);
+    QUERY(W3D_Q_FOGGING);
+    QUERY(W3D_Q_LINEAR);
+    QUERY(W3D_Q_EXPONENTIAL);
+    QUERY(W3D_Q_S_EXPONENTIAL);
+    QUERY(W3D_Q_INTERPOLATED);
+    QUERY(W3D_Q_ANTIALIASING);
+    QUERY(W3D_Q_ANTI_POINT);
+    QUERY(W3D_Q_ANTI_LINE);
+    QUERY(W3D_Q_ANTI_POLYGON);
+    QUERY(W3D_Q_ANTI_FULLSCREEN);
+    QUERY(W3D_Q_DITHERING);
+    QUERY(W3D_Q_PALETTECONV);
+    QUERY(W3D_Q_SCISSOR);
+    QUERY(W3D_Q_RECTTEXTURES);
+    QUERY(W3D_Q_LOGICOP);
+    QUERY(W3D_Q_MASKING);
+    QUERY(W3D_Q_STENCILBUFFER);
+    QUERY(W3D_Q_STENCIL_MASK);
+    QUERY(W3D_Q_STENCIL_FUNC);
+    QUERY(W3D_Q_STENCIL_SFAIL);
+    QUERY(W3D_Q_STENCIL_DPFAIL);
+    QUERY(W3D_Q_STENCIL_DPPASS);
+    QUERY(W3D_Q_STENCIL_WRMASK);
+    QUERY(W3D_Q_DRAW_POINT_TEX);
+    QUERY(W3D_Q_DRAW_LINE_TEX);
+    QUERY(W3D_Q_CULLFACE);
+        default:
+    LOG_ERROR("%s: Unknown query value %lu\n", __func__, query);
+    return W3D_UNSUPPORTED;
+    }
 
     // Let's pretend everything is supported for now
     return W3D_FULLY_SUPPORTED;
 }
+
+ULONG W3D_Query(W3D_Context * context __asm("a0"), ULONG query __asm("d0"), ULONG destfmt __asm("d1"), VC4D* vc4d __asm("a6"))
+{
+    (void)context;
+    return W3D_QueryDriver((W3D_Driver*)&driver, query, destfmt, vc4d);
+}
+
 
 ULONG
 W3D_GetDriverTexFmtInfo(     W3D_Driver* driver __asm("a0"),
@@ -1758,12 +1762,11 @@ ULONG W3D_DrawTriFanV(W3D_Context * context __asm("a0"), W3D_TrianglesV * triang
     TRACE();
 
 
-    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
-    init_vertex(&a, triangles->v[0], perspective);
+    init_vertex(&a, triangles->v[0], context);
     TRACE();
-    init_vertex(&b, triangles->v[1], perspective);
-    init_vertex(&c, triangles->v[2], perspective);
+    init_vertex(&b, triangles->v[1], context);
+    init_vertex(&c, triangles->v[2], context);
 
     draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     TRACE();
@@ -1772,7 +1775,7 @@ ULONG W3D_DrawTriFanV(W3D_Context * context __asm("a0"), W3D_TrianglesV * triang
     for (int i = 3; i < triangles->vertexcount; ++i) {
         VSWAP(v2, v3);
 
-        init_vertex(v3, triangles->v[i], perspective);
+        init_vertex(v3, triangles->v[i], context);
 
         draw_triangle(vc4d, (VC4D_Context*)context, &a, v2, v3);
 
@@ -1802,18 +1805,17 @@ ULONG W3D_DrawTriStripV(W3D_Context * context __asm("a0"), W3D_TrianglesV * tria
 
     draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangles->tex);
 
-    const BOOL perspective = (context->state & W3D_PERSPECTIVE) != 0;
     vertex a, b, c;
 
     for (int i = 0; i < triangles->vertexcount - 2; ++i) {
         if (i & 1) {
-            init_vertex(&a, triangles->v[i + 1], perspective);
-            init_vertex(&b, triangles->v[i + 0], perspective);
-            init_vertex(&c, triangles->v[i + 2], perspective);
+            init_vertex(&a, triangles->v[i + 1], context);
+            init_vertex(&b, triangles->v[i + 0], context);
+            init_vertex(&c, triangles->v[i + 2], context);
         } else {
-            init_vertex(&a, triangles->v[i + 0], perspective);
-            init_vertex(&b, triangles->v[i + 1], perspective);
-            init_vertex(&c, triangles->v[i + 2], perspective);
+            init_vertex(&a, triangles->v[i + 0], context);
+            init_vertex(&b, triangles->v[i + 1], context);
+            init_vertex(&c, triangles->v[i + 2], context);
         }
         draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
     }
@@ -1832,8 +1834,7 @@ void
 W3D_FreeScreenmodeList(     W3D_ScreenMode * list __asm("a0"),
  VC4D* vc4d __asm("a6"))
 {
-    //XXX: Reintroduce this...
-    //TODO(__func__);
+    TODO(__func__);
 }
 
 ULONG
@@ -1893,6 +1894,7 @@ ULONG W3D_VertexPointer(W3D_Context* context __asm("a0"), void * pointer __asm("
     context->VertexPointer = pointer;
     context->VPStride = stride;
     context->VPMode = mode;
+    context->VPFlags = flags;
     return W3D_SUCCESS;
 }
 
@@ -1903,6 +1905,10 @@ W3D_TexCoordPointer(W3D_Context* context __asm("a0"), void * pointer __asm("a1")
     if (unit /*>= W3D_MAX_TMU*/ > 0) {
         LOG_ERROR("%s: Unsupported tmu: %lu\n", __func__, unit);
         return W3D_ILLEGALINPUT;
+    }
+    if (off_w & 0x8000) {
+        // XXX: StormMesa2010 casts off_v and off_w to UWORD??!?!
+        off_w = (short)(off_w & 0xffff);
     }
     context->TexCoordPointer[unit] = pointer;
     context->TPStride[unit] = stride;
@@ -1915,7 +1921,10 @@ W3D_TexCoordPointer(W3D_Context* context __asm("a0"), void * pointer __asm("a1")
 ULONG W3D_ColorPointer(W3D_Context* context __asm("a0"), void * pointer __asm("a1"), int stride __asm("d0"), ULONG format __asm("d1"), ULONG mode __asm("d2"), ULONG flags __asm("d3"), VC4D* vc4d __asm("a6"))
 {
     TRACE();
-    TODO(__func__);
+    context->ColorPointer = pointer;
+    context->CPStride = stride;
+    context->CPMode = mode | format;
+    context->CPFlags = flags;
     return W3D_SUCCESS;
 }
 
@@ -1927,7 +1936,6 @@ ULONG W3D_BindTexture(W3D_Context* context __asm("a0"), ULONG tmu __asm("d0"), W
         return W3D_ILLEGALINPUT;
     }
 	context->CurrentTex[tmu] = texture;
-    TODO(__func__);
     return W3D_SUCCESS;
 }
 
@@ -1983,18 +1991,19 @@ static void init_vertex_arr(VC4D* vc4d, W3D_Context* context, vertex* v, ULONG i
             default:
                 LOG_DEBUG("%s: TODO support VPMode %lu\n", __func__, context->VPMode);
         }
-        w.w = 1.0f / w.z;
     }
 
     if (context->TexCoordPointer[0] && context->CurrentTex[0]) {
         ULONG tp = (ULONG)context->TexCoordPointer[0] + i * context->TPStride[0];
         w.u = *(float*)tp;
-        w.v = *(float*)(tp + context->TPVOffs[0]);
-        w.w = *(float*)(tp + context->TPWOffs[0]);
+        w.v = *(float*)(tp + (int)context->TPVOffs[0]);
+        w.w = *(float*)(tp + (int)context->TPWOffs[0]);
         if (context->TPFlags[0] == W3D_TEXCOORD_NORMALIZED) {
             w.u *= context->CurrentTex[0]->texwidth;
             w.v *= context->CurrentTex[0]->texheight;
         }
+    } else {
+        w.w = 1.0f / w.z;
     }
 
     if (context->ColorPointer) {
@@ -2037,7 +2046,7 @@ static void init_vertex_arr(VC4D* vc4d, W3D_Context* context, vertex* v, ULONG i
 //#define W3D_CMODE_BGRA      0x10
     }
 
-    init_vertex(v, &w, (context->state & W3D_PERSPECTIVE) != 0);
+    init_vertex(v, &w, context);
 }
 
 #define INIT_VERTEX_ARR(v, i) init_vertex_arr(vc4d, context, v, i)
@@ -2084,8 +2093,6 @@ ULONG W3D_DrawArray(W3D_Context* context __asm("a0"), ULONG primitive __asm("d0"
     } else if (primitive == W3D_PRIMITIVE_TRISTRIP) {
         TRACE();
         for (ULONG i = 0; i < count - 2; ++i) {
-            // XXX much trace here...
-            TRACE();
             if (i & 1) {
                 INIT_VERTEX_ARR(&a, base + i + 1);
                 INIT_VERTEX_ARR(&b, base + i + 0);
@@ -2095,9 +2102,15 @@ ULONG W3D_DrawArray(W3D_Context* context __asm("a0"), ULONG primitive __asm("d0"
                 INIT_VERTEX_ARR(&b, base + i + 1);
                 INIT_VERTEX_ARR(&c, base + i + 2);
             }
-            TRACE();
             draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
-            TRACE();
+        }
+    } else if (primitive == W3D_PRIMITIVE_TRIANGLES) {
+        TRACE();
+        for (ULONG i = 0; i < count; i += 3) {
+            INIT_VERTEX_ARR(&a, base + i + 0);
+            INIT_VERTEX_ARR(&b, base + i + 1);
+            INIT_VERTEX_ARR(&c, base + i + 2);
+            draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
         }
     } else {
         LOG_DEBUG("TODO: %s %s count=%lu\n", __func__, primitive_type_names[primitive], count);
@@ -2173,11 +2186,13 @@ ULONG W3D_DrawElements(W3D_Context* context __asm("a0"), ULONG primitive __asm("
     return W3D_SUCCESS;
 }
 
-void
-W3D_SetFrontFace(     W3D_Context* context __asm("a0"),
-     ULONG direction __asm("d0"),
- VC4D* vc4d __asm("a6"))
+void W3D_SetFrontFace(W3D_Context* context __asm("a0"), ULONG direction __asm("d0"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
+    if (direction != W3D_CW && direction != W3D_CCW) {
+        LOG_ERROR("%s: Invalid front face: %lu\n", __func__, direction);
+        return;
+    }
+
+    context->FrontFaceOrder = direction;
 }
 
