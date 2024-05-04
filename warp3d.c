@@ -1737,13 +1737,23 @@ ULONG W3D_ClearDrawRegion(W3D_Context * context __asm("a0"), ULONG color __asm("
     return W3D_SUCCESS;
 }
 
-ULONG
-W3D_DrawTriangleV(     W3D_Context * context __asm("a0"),
-     W3D_TriangleV * triangle __asm("a1"),
- VC4D* vc4d __asm("a6"))
+ULONG W3D_DrawTriangleV(W3D_Context * context __asm("a0"), W3D_TriangleV * triangle __asm("a1"), VC4D* vc4d __asm("a6"))
 {
-    TODO(__func__);
-    return W3D_UNSUPPORTED;
+    TRACE();
+    if (!context->HWlocked) {
+        LOG_ERROR("%s: Hardware not locked!\n", __func__);
+        return W3D_NOT_SUPPORTED;
+    }
+
+    vertex a, b, c;
+
+    init_vertex(&a, triangle->v1, context);
+    init_vertex(&b, triangle->v2, context);
+    init_vertex(&c, triangle->v3, context);
+    draw_setup(vc4d, (VC4D_Context*)context, (VC4D_Texture*)triangle->tex);
+
+    draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+    return W3D_SUCCESS;
 }
 
 ULONG W3D_DrawTriFanV(W3D_Context * context __asm("a0"), W3D_TrianglesV * triangles __asm("a1"), VC4D* vc4d __asm("a6"))
@@ -2182,6 +2192,14 @@ ULONG W3D_DrawElements(W3D_Context* context __asm("a0"), ULONG primitive __asm("
                 INIT_VERTEX_ARR_E(&b, i + 1);
                 INIT_VERTEX_ARR_E(&c, i + 2);
             }
+            draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
+        }
+    } else if (primitive == W3D_PRIMITIVE_TRIANGLES) {
+        TRACE();
+        for (ULONG i = 0; i < count; i += 3) {
+            INIT_VERTEX_ARR_E(&a, i + 0);
+            INIT_VERTEX_ARR_E(&b, i + 1);
+            INIT_VERTEX_ARR_E(&c, i + 2);
             draw_triangle(vc4d, (VC4D_Context*)context, &a, &b, &c);
         }
     } else {
